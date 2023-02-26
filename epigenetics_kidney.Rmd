@@ -1,0 +1,147 @@
+---
+title: "epigenetics"
+author: "Aubrey Roberts"
+date: "2023-02-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(seqinr)
+library(DESeq2)
+
+# Access MoTrPAC data from this package
+library(MotrpacRatTraining6moData)
+library(MotrpacRatTraining6mo)
+```
+
+# Notes
+```{r dict}
+# We will look at chromatin accessibility (ATAC) and DNA methylation (METHYL). 
+
+# DICTIONARY:
+
+# Available data: 8 different tissues have ATAC data:
+# HIPPOC: hippocampus
+# BAT: brown adipose tissue
+# HEART: heart
+# LUNG: lung
+# LIVER: liver
+# WAT-SC: subcutaneous white adipose tissue
+# KIDNEY: kidney
+# SKM_GN: gastrocnemius (leg skeletal muscle)
+
+# ATAC: chromatin accessibility
+# METHYL: DNA methylation, RRBS data
+
+
+# ANALYSIS PLAN:
+
+# 1) Do PCA plot with response to exercise as the focus ("group"); make it color gradient not a factor -- pick tissue with biggest exercise separation gradient (control vs. 1 vs 2. vs. 4 vs. 8 weeks). We chose kidney tissue.
+
+# 2) Use table browser from UCSC. Download promoter regions from UCSC 1kb region upstream. Look at which of our peaks (row names) correspond to peaks near promoters. These will likely be most interesting/relevant to gene expression. Use bedtools (ask prof to share slides for bed tools).
+
+# 3) Use two methods for differential peak analysis. Feed it the peaks by promoter regions we identified. 
+# a) With normalized data: wilcoxon rank sum and benj hochberg correction
+# b) With unnormalized data: DESeq2 -- does multiple hypothesis testing on everything 
+
+# 4) Look at peaks differentially open in promoter regions and do pathway analysis. Compare wilcoxon rank sum and DESeq2 output.
+
+```
+
+# Load Kidney Data
+```{r kidneydata}
+
+# Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
+
+kidney<-load(file="/Users/aubreyroberts/Desktop/BIODS_205/MotrpacKidneyData/ATAC_KIDNEY_NORM_DATA.rda")
+kidney_raw<-load(file="/Users/aubreyroberts/Desktop/BIODS_205/MotrpacKidneyData/ATAC_KIDNEY_RAW_COUNTS.rda")
+
+# We now have loaded in two new frames of counts:
+
+# Normalized - ATAC_KIDNEY_NORM_DATA
+
+head(ATAC_KIDNEY_NORM_DATA)
+
+# Raw - ATAC_KIDNEY_RAW_COUNTS
+
+head(ATAC_KIDNEY_RAW_COUNTS)
+
+```
+
+# PCA plot for kidney
+```{r kidneyPCA}
+         
+# Create PCA plot of normalized data
+
+# First four columns are metadata, so we don't need in normalized count matrix
+sample_ids = colnames(ATAC_KIDNEY_NORM_DATA)[-c(1:4)]
+
+# Perform PCA
+pca = stats::prcomp(t(ATAC_KIDNEY_NORM_DATA[,sample_ids]))
+  
+# Make a data frame with some phenotypic data and the first 3 PCs
+df = data.frame(
+  group = PHENO[sample_ids,"group"],
+  sex = PHENO[sample_ids,"sex"],
+  pca$x[,1:3] # take the first principal components
+)
+
+# Plot the first two PCs
+print(ggplot(df, aes(x=PC1, y=PC2, color=group, shape=sex)) +
+  geom_point(size=3))+ggtitle("Kidney")+theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+# Differential Peaks with DESeq2
+```{r deseq2}
+
+# Filter for peaks of interest near promoters:
+
+# Ideally, we will filter for peaks in promoter region before this -- then do differential expression below.
+# Use "upstream1000.fa.gz" file from UCSC genome browser: https://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/ to filter for peaks of interest in promoter regions
+# Need to convert this file into a bed file, use bedtools to see which of our peaks fall in given regions in file.
+# Then feed these peaks of interest into DESeq2.
+
+
+# Differential Expression:
+
+# Set features to rownames
+rownames(ATAC_KIDNEY_RAW_COUNTS) <- ATAC_KIDNEY_RAW_COUNTS$feature_ID
+
+ATAC_KIDNEY_RAW_COUNTS<-ATAC_KIDNEY_RAW_COUNTS[,-c(1:4)]
+
+head(ATAC_KIDNEY_RAW_COUNTS)
+
+sampleIDs<-colnames(ATAC_KIDNEY_RAW_COUNTS)
+
+# Filter for phenodata for kidney samples
+kidney_PHENO<-PHENO %>% 
+  filter(rownames(PHENO) %in% sampleIDs)
+
+# Make sure order of samples is the same
+kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+
+rownames(kidney_PHENO) == colnames(ATAC_KIDNEY_RAW_COUNTS)
+
+# DESeq2
+dds <- DESeqDataSetFromMatrix(countData = ATAC_KIDNEY_RAW_COUNTS, 
+                              colData = kidney_PHENO,
+                              design = ~group+sex)
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+summary(res)
+
+plotMA(res)
+
+```
+
+
+
+
+
+
