@@ -55,8 +55,9 @@ library(MotrpacRatTraining6mo)
 
 # Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 
-kidney<-load(file="/Users/aubreyroberts/Desktop/BIODS_205/MotrpacKidneyData/ATAC_KIDNEY_NORM_DATA.rda")
-kidney_raw<-load(file="/Users/aubreyroberts/Desktop/BIODS_205/MotrpacKidneyData/ATAC_KIDNEY_RAW_COUNTS.rda")
+kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
+kidney_raw<-load(file="ATAC_KIDNEY_RAW_COUNTS.rda")
+annotation<-load(file="ATAC_FEATURE_ANNOT.rda")
 
 # We now have loaded in two new frames of counts:
 
@@ -93,6 +94,68 @@ print(ggplot(df, aes(x=PC1, y=PC2, color=group, shape=sex)) +
   geom_point(size=3))+ggtitle("Kidney")+theme(plot.title = element_text(hjust = 0.5))
 
 ```
+
+```{r}
+annotation_concise <- ATAC_FEATURE_ANNOT %>% select("feature_ID","chrom","start","end")
+combined_data <- left_join(annotation_concise, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+```
+
+```{r}
+bed_data <- annotation_concise %>% select(-c("feature_ID"))
+bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
+bed_data$start <- as.integer(bed_data$start)
+bed_data$end <- as.integer(bed_data$end)
+write.table(bed_data, "kidney_peaks.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
+
+promoter_data <- read.table("fake_bed.csv",sep=',')[-1,]
+promoter_data$V2 <- as.integer(promoter_data$V2)
+promoter_data$V3 <- as.integer(promoter_data$V3)
+write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
+```
+
+```{r}
+combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
+# bedtools intersect -a kidney_peaks.bed -b promoter.bed -wa > intersect.bed
+promoter_peaks <- read.table("intersect.bed",sep="\t")
+colnames(promoter_peaks) <- c("chrom","start","end")
+
+filtered_peaks <- left_join(promoter_peaks, combined_data)
+```
+
+```{r}
+filtered_peaks_dist <- filtered_peaks %>% distinct()
+rownames(filtered_peaks_dist) <- filtered_peaks_dist$feature_ID
+deseq_data <- filtered_peaks_dist[,-c(1:4)]
+
+```
+
+
+```{r}
+sampleIDs<-colnames(deseq_data)
+
+# Filter for phenodata for kidney samples
+kidney_PHENO<-PHENO %>% 
+  filter(rownames(PHENO) %in% sampleIDs)
+
+# Make sure order of samples is the same
+kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+
+rownames(kidney_PHENO) == colnames(deseq_data)
+
+# DESeq2
+dds <- DESeqDataSetFromMatrix(countData = deseq_data, 
+                              colData = kidney_PHENO,
+                              design = ~sex+group)
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+summary(res)
+
+plotMA(res)
+```
+
 
 # Differential Peaks with DESeq2
 ```{r deseq2}
