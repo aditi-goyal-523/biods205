@@ -246,8 +246,6 @@ any(filtered_raw_counts[ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID,])
 # 6 DEGs they found are in promoter region -- they used limma on all features?
 sum(ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID %in% rownames(filtered_raw_counts))
 
-
-
 # 1) troubleshoot PREPROCESS for DESeq2 - need to do some normalization; size factor adjustment/normalization
 
 # 2) DO WILCOXON FOLLOWED BY BENJ HOCH
