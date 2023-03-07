@@ -2,4 +2,6 @@
 
 Aditi Goyal, Sophie Parsa, Aubrey Roberts
 
-This repo contains the code for analyzing ______ data, in accordance to the final project guidelines for BIODS 205: Bioinformatics for Stem Cell and Cancer Biology
+This repo contains the code for analyzing MoTrPAC epigenetic data for kidney in rats, in accordance to the final project guidelines for BIODS 205: Bioinformatics for Stem Cell and Cancer Biology.
+
+Epigenetic data downloaded from: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
