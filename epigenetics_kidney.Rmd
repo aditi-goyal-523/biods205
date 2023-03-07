@@ -12,6 +12,9 @@ library(ggplot2)
 library(seqinr)
 library(DESeq2)
 library(EnhancedVolcano)
+library(edgeR)
+library(fgsea)
+library(data.table)
 
 # Access MoTrPAC data from this package
 library(MotrpacRatTraining6moData)
@@ -231,38 +234,38 @@ EnhancedVolcano(control_8w,
     x = 'log2FoldChange',
     y = 'padj')
 
-
 ```
 
 
 # Moving forward...
 ```{r}
-
 ## INSTRUCTIONS FOR HOW TO PROCEED:
-# 1) INTERSECT the FDR normalized peaks with the promoter region to see if those 237 regions are in promoter
 
+# 1) INTERSECT the FDR normalized peaks with the promoter region to see if those 237 regions are in promoter --- DONE.
 # 237 DEGs from main paper
 any(filtered_raw_counts[ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID,])
-
 # 6 DEGs they found are in promoter region -- they used limma on all features?
 sum(ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID %in% rownames(filtered_raw_counts))
 
 # 1) troubleshoot PREPROCESS for DESeq2 - need to do some normalization; size factor adjustment/normalization
 
-# 2) DO WILCOXON FOLLOWED BY BENJ HOCH
-summary(colSums(filtered_raw_counts))
+# 2) DO WILCOXON FOLLOWED BY BENJ HOCH -- DONE.
 
 # 3) limma or edgeR for bulk atac seq as well
 
 # 4) compare the techniques
 
-# 5) bed merge - can look for overlapping segments in our kidney data; sum the peaks and exclude overlapping peaks; tool in bedtools to sum to get single value for gene
+# 5) bed merge - can look for overlapping segments in our kidney data; sum the peaks and exclude overlapping peaks; tool in bedtools to sum to get single value for gene --- DONE.
 
+
+## 3/7/23 Notes:
+# try wilcoxin rank sum on promoter region AND all peaks (even non-promoter)?
+# prerank GSEA -- log fold change for unique genes (collapse all peaks into unique genes first); see if any gene sets are more skewed to one phenotype/timepoint
+# fgsea package?
+# Look up how they did limma for MoTrPAC and got the DE peaks
 ```
-# Use Limma
+# LIMMA
 ```{r limma}
-
-library(edgeR)
 
 # Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
 design <- model.matrix(~0+kidney_PHENO$group+kidney_PHENO$sex)
@@ -286,6 +289,135 @@ efit <- eBayes(vfit)
 summary(decideTests(efit))
 
 # View top DEGs with topTreat()
+topTreat(efit)
+
+# Highest log fold changes:
+top.table<-topTreat(efit, sort.by = "logFC", n=Inf)
+head(top.table)
+length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
+
+```
+
+# NORMALIZATION
+# Normalize filtered_raw_counts to "filtered_norm_counts" for Wilcoxin rank sum (adapted from Bootcamp)
+```{r}
+# Remove genes with 0 counts in ALL samples
+# sum gene expression across samples
+genesum <- rowSums(filtered_raw_counts)
+
+# subset dataframe
+filtered_norm_counts <- filtered_raw_counts[genesum>0,] # filters out 2 peaks
+dim(filtered_raw_counts)
+dim(filtered_norm_counts)
+
+# CPM normalization
+# sum all counts per sample
+samplesums <- colSums(filtered_norm_counts)
+
+# divide sum of each sample (column) by 1,000,000 to derive scalefactor
+scalefactor <- samplesums/1000000
+
+# divide expression in each sample (column) by corresponding scalefactor
+filtered_norm_counts <- t(t(filtered_norm_counts) / scalefactor)  #transposition is important to divide across columns
+
+#check that all samples summed expression == 1M
+colSums(filtered_norm_counts)
+
+# Log2 Normalization
+# use +1 because can't take logs of zero
+filtered_norm_counts <- log2(filtered_norm_counts + 1)
+head(filtered_norm_counts)
+
+```
+
+# WILCOXON RANK SUM
+# Differential Expression with two-sided Wilcoxon rank sums test followed by Benjamini-Hochberg adjustment of p-values
+```{r wilcox}
+# Want to use normalized data for this.
+
+# we want to compare pairs of phenotypes: control, 1wk, 2wk, 4wk, 8wk --- four pairwise contrasts (control v 1, control v 2, control v 4, control v 8)
+
+# create subsets of IDs 
+controlids <- rownames(kidney_PHENO[kidney_PHENO$group=="control",])
+week1_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="1w",])
+week2_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="2w",])
+week4_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="4w",])
+week8_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="8w",])
+
+# Note: filtered_norm_counts stores normalized count data for promoter regions only; could also try this with ATAC_KIDNEY_NORM_DATA (normalized data for all peaks, even outside promoter)
+
+# Run Wilcoxon rank sum test (control vs. 4 wk):
+
+todf <- list()
+# for loop through all genes
+allgenes <- rownames(ATAC_KIDNEY_NORM_DATA)
+for (i in seq(length(allgenes))){
+  
+  # calculate log2fc between control and 4 wk
+  gene <- allgenes[i]
+  control <- as.numeric(ATAC_KIDNEY_NORM_DATA[i,controlids])
+  wk4 <- as.numeric(ATAC_KIDNEY_NORM_DATA[i,week4_ids])
+  log2fc <- mean(control) - mean(wk4)   #log(control/wk4) = log(control)-log(4wk)
+  
+  # wilcoxon rank sums - outputs tstatistic and pvalue; extract pvalue
+  res <- wilcox.test(control, wk4, alternative = "two.sided", exact=FALSE)
+  pvalue <- res$p.value
+  
+  # store results
+  todf[[i]] <- c(gene, log2fc, pvalue)
+}
+
+# reformat list of vectors into dataframe
+dfstats <- as.data.frame(do.call(rbind, todf))
+colnames(dfstats) <- c("gene", "log2fc", "pvalue")
+dfstats$log2fc <- as.numeric(dfstats$log2fc)
+dfstats$pvalue <- as.numeric(dfstats$pvalue)
+dfstats <- dfstats[order(dfstats$pvalue),]
+head(dfstats)
+
+# multiple hypothesis correction using benjamini-hochberg procedure
+dfstats$qvalue <- p.adjust(dfstats$pvalue, method="BH")
+dfstats[(dfstats$qvalue<0.05),]
+any(dfstats$qvalue < 0.05) # NO SIGNIFICANT P-VALUES AFTER ADJUSTMENT 
+
+# volcano plot with p value
+EnhancedVolcano(dfstats,
+    lab = dfstats$gene,
+    x = 'log2fc',
+    y = 'qvalue',
+    title = 'Differential Expression Control/4wk')
+```
+
+# GSEA
+# Fast preranked gene set enrichment analysis (GSEA) with LFC of genes
+```{r gsea}
+
+library(fgsea)
+# Good resource: https://bioinformatics-core-shared-training.github.io/RNAseq_September_2019/html/06_Gene_set_testing.html#fgsea
+
+# Step 1: Ranking Data. Provide fgsea a vector containing numeric data by which it should rank the genes. 
+# We can rank based on fold change.
+
+rankData<-top.table$logFC
+names(rankData) <- rownames(top.table)
+
+# Step 2: Load in pathways (external source?)
+
+# Step 3: Conduct analysis
+fgseaRes <- fgsea(pathways,
+                  rankData,
+                  minSize = 15,
+                  maxSize = 500,
+                  nperm = 1000)
+
+# use plotEnrichment() later to plot enrichment scores
+# use plotGseaTable() to plot a summary figure showing pathways
+
+
+```
+
+
+
 
 
 
