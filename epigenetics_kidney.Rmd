@@ -6,10 +6,12 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+# Load packages
 library(tidyverse)
 library(ggplot2)
 library(seqinr)
 library(DESeq2)
+library(EnhancedVolcano)
 
 # Access MoTrPAC data from this package
 library(MotrpacRatTraining6moData)
@@ -53,6 +55,8 @@ library(MotrpacRatTraining6mo)
 # Load Kidney Data
 ```{r kidneydata}
 
+setwd("/Users/aubreyroberts/Documents/GitHub/biods205/")
+
 # Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 
 kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
@@ -71,7 +75,7 @@ head(ATAC_KIDNEY_RAW_COUNTS)
 
 ```
 
-# PCA plot for kidney
+# PCA plot for kidney - MAKE INTO COLOR GRADIENT
 ```{r kidneyPCA}
          
 # Create PCA plot of normalized data
@@ -94,12 +98,36 @@ print(ggplot(df, aes(x=PC1, y=PC2, color=group, shape=sex)) +
   geom_point(size=3))+ggtitle("Kidney")+theme(plot.title = element_text(hjust = 0.5))
 
 ```
-
+# Select for peaks of interest (near promoter regions)
 ```{r}
+
+# Filter for peaks of interest near promoters:
+
+# Ideally, we will filter for peaks in promoter region before this -- then do differential expression below.
+# Use "upstream1000.fa.gz" file from UCSC genome browser: https://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/ to filter for peaks of interest in promoter regions
+# Need to convert this file into a bed file, use bedtools to see which of our peaks fall in given regions in file.
+# Then feed these peaks of interest into DESeq2.
+
+# Load annotated peak data
 annotation_concise <- ATAC_FEATURE_ANNOT %>% select("feature_ID","chrom","start","end")
+
+dim(ATAC_FEATURE_ANNOT)
+dim(ATAC_KIDNEY_RAW_COUNTS)
+
+# Join our data frame of our peaks with annotated data
 combined_data <- left_join(annotation_concise, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+
+vec<-unique(annotation_concise$feature_ID)
+all(vec %in% ATAC_KIDNEY_RAW_COUNTS$feature_ID)
+all(ATAC_KIDNEY_RAW_COUNTS$feature_ID %in% vec)
+
+all(annotation_concise$feature_ID)
+head(ATAC_KIDNEY_RAW_COUNTS)
+head(annotation_concise)
+
 ```
 
+# Prepare bed files
 ```{r}
 bed_data <- annotation_concise %>% select(-c("feature_ID"))
 bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
@@ -113,95 +141,126 @@ promoter_data$V3 <- as.integer(promoter_data$V3)
 write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 ```
 
+# Intersect peaks with promoter region
 ```{r}
 combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
+
 # bedtools intersect -a kidney_peaks.bed -b promoter.bed -wa > intersect.bed
+
 promoter_peaks <- read.table("intersect.bed",sep="\t")
 colnames(promoter_peaks) <- c("chrom","start","end")
 
 filtered_peaks <- left_join(promoter_peaks, combined_data)
 ```
 
+# Keep peaks that overlap with promoter region
 ```{r}
+# Filter for peaks of interest
+
 filtered_peaks_dist <- filtered_peaks %>% distinct()
+
+# Set features to rownames to format filtered raw counts for DESeq2
+
 rownames(filtered_peaks_dist) <- filtered_peaks_dist$feature_ID
-deseq_data <- filtered_peaks_dist[,-c(1:4)]
+
+filtered_raw_counts <- filtered_peaks_dist[,-c(1:4)]
+
+dim(filtered_raw_counts)
+
+```
+
+# Run DESeq2 for differential expression of promoter peaks
+```{r deseq}
+# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
+# Filter for phenodata for kidney samples in filtered raw counts
+sampleIDs<-colnames(filtered_raw_counts)
+
+kidney_PHENO<-PHENO %>% 
+  filter(rownames(PHENO) %in% sampleIDs)
+
+# Make sure order of samples is the same
+kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+
+rownames(kidney_PHENO) == colnames(filtered_raw_counts)
+
+head(filtered_raw_counts)
+dim(kidney_PHENO)
+
+# Run DESeq2 on filtered raw counts and phenodata
+dds <- DESeqDataSetFromMatrix(countData = filtered_raw_counts, 
+                              colData = kidney_PHENO,
+                              design = ~group)
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+summary(res)
+
+plotMA(res)
+
+# Look at contrasts between groups
+unique(PHENO$group)
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1w <-results(dds, contrast=c("group","control","1w")) 
+summary(control_1w)
+head(control_1w[order(control_1w$padj),], 10)
+
+
+# Control vs. 2 week
+control_2w <- results(dds, contrast=c("group", "control", "2w"))
+head(control_2w[order(control_2w$padj),], 10)
+
+
+# Control vs. 8 week
+control_8w <- results(dds, contrast=c("group", "control", "8w"))
+summary(control_8w)
+head(control_8w[order(control_8w$padj),], 10)
+
+
+#Volcano for Control vs. 8 week
+control_8w <- control_8w[order(res$padj),]
+rownames(control_8w) <- control_8w$row
+head(control_8w)
+
+EnhancedVolcano(control_8w,
+    lab = rownames(control_8w),
+    x = 'log2FoldChange',
+    y = 'padj')
+
 
 ```
 
 
+# Moving forward...
 ```{r}
-sampleIDs<-colnames(deseq_data)
 
-# Filter for phenodata for kidney samples
-kidney_PHENO<-PHENO %>% 
-  filter(rownames(PHENO) %in% sampleIDs)
+## INSTRUCTIONS FOR HOW TO PROCEED:
+# 1) INTERSECT the FDR normalized peaks with the promoter region to see if those 237 regions are in promoter
 
-# Make sure order of samples is the same
-kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+# 237 DEGs from main paper
+any(filtered_raw_counts[ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID,])
 
-rownames(kidney_PHENO) == colnames(deseq_data)
-
-# DESeq2
-dds <- DESeqDataSetFromMatrix(countData = deseq_data, 
-                              colData = kidney_PHENO,
-                              design = ~sex+group)
-
-dds <- DESeq(dds)
-
-res <- results(dds)
-
-summary(res)
-
-plotMA(res)
-```
+# 6 DEGs they found are in promoter region -- they used limma on all features?
+sum(ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID %in% rownames(filtered_raw_counts))
 
 
-# Differential Peaks with DESeq2
-```{r deseq2}
 
-# Filter for peaks of interest near promoters:
+# 1) troubleshoot PREPROCESS for DESeq2 - need to do some normalization; size factor adjustment/normalization
 
-# Ideally, we will filter for peaks in promoter region before this -- then do differential expression below.
-# Use "upstream1000.fa.gz" file from UCSC genome browser: https://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/ to filter for peaks of interest in promoter regions
-# Need to convert this file into a bed file, use bedtools to see which of our peaks fall in given regions in file.
-# Then feed these peaks of interest into DESeq2.
+# 2) DO WILCOXON FOLLOWED BY BENJ HOCH
+summary(colSums(filtered_raw_counts))
 
+# 3) limma or edgeR for bulk atac seq as well
 
-# Differential Expression:
+# 4) compare the techniques
 
-# Set features to rownames
-rownames(ATAC_KIDNEY_RAW_COUNTS) <- ATAC_KIDNEY_RAW_COUNTS$feature_ID
-
-ATAC_KIDNEY_RAW_COUNTS<-ATAC_KIDNEY_RAW_COUNTS[,-c(1:4)]
-
-head(ATAC_KIDNEY_RAW_COUNTS)
-
-sampleIDs<-colnames(ATAC_KIDNEY_RAW_COUNTS)
-
-# Filter for phenodata for kidney samples
-kidney_PHENO<-PHENO %>% 
-  filter(rownames(PHENO) %in% sampleIDs)
-
-# Make sure order of samples is the same
-kidney_PHENO<-arrange(kidney_PHENO, viallabel)
-
-rownames(kidney_PHENO) == colnames(ATAC_KIDNEY_RAW_COUNTS)
-
-# DESeq2
-dds <- DESeqDataSetFromMatrix(countData = ATAC_KIDNEY_RAW_COUNTS, 
-                              colData = kidney_PHENO,
-                              design = ~group+sex)
-
-dds <- DESeq(dds)
-
-res <- results(dds)
-
-summary(res)
-
-plotMA(res)
+# 5) bed merge - can look for overlapping segments in our kidney data; sum the peaks and exclude overlapping peaks; tool in bedtools to sum to get single value for gene
 
 ```
+
 
 
 
