@@ -151,6 +151,7 @@ promoter_peaks <- read.table("intersect.bed",sep="\t")
 colnames(promoter_peaks) <- c("chrom","start","end")
 
 filtered_peaks <- left_join(promoter_peaks, combined_data)
+
 ```
 
 # Keep peaks that overlap with promoter region
@@ -258,7 +259,37 @@ summary(colSums(filtered_raw_counts))
 # 5) bed merge - can look for overlapping segments in our kidney data; sum the peaks and exclude overlapping peaks; tool in bedtools to sum to get single value for gene
 
 ```
+# Use Limma
+```{r limma}
 
+library(edgeR)
+
+# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
+design <- model.matrix(~0+kidney_PHENO$group+kidney_PHENO$sex)
+colnames(design) <-c("oneweek", "twoweek", "fourweek", "eightweek", "control", "male")
+design
+
+# Specify contrasts with makeContrasts()
+contr.matrix <- makeContrasts(
+   control_vs_eight = control - eightweek,
+   control_vs_four = control - fourweek,
+   control_vs_two = control - twoweek,
+   control_vs_one = control - oneweek,
+   levels = colnames(design))
+contr.matrix
+
+#In limma, linear modelling is carried out on the log-CPM values which are assumed to be normally distributed and the mean-variance relationship is accommodated using precision weights calculated by the voom function.
+v<-voom(filtered_raw_counts, design=design, plot=TRUE)
+vfit <- lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+efit <- eBayes(vfit)
+summary(decideTests(efit))
+
+# View top DEGs with topTreat()
+
+
+
+```
 
 
 
