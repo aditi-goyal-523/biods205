@@ -11,10 +11,14 @@ library(tidyverse)
 library(ggplot2)
 library(seqinr)
 library(DESeq2)
+<<<<<<< Updated upstream
 library(EnhancedVolcano)
 library(edgeR)
 library(fgsea)
 library(data.table)
+=======
+#library(EnhancedVolcano)
+>>>>>>> Stashed changes
 
 # Access MoTrPAC data from this package
 library(MotrpacRatTraining6moData)
@@ -58,7 +62,7 @@ library(MotrpacRatTraining6mo)
 # Load Kidney Data
 ```{r kidneydata}
 
-setwd("/Users/aubreyroberts/Documents/GitHub/biods205/")
+#setwd("/Users/aubreyroberts/Documents/biods205_proj/")
 
 # Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 
@@ -136,18 +140,20 @@ bed_data <- annotation_concise %>% select(-c("feature_ID"))
 bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 bed_data$start <- as.integer(bed_data$start)
 bed_data$end <- as.integer(bed_data$end)
-write.table(bed_data, "kidney_peaks.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
+#write.table(bed_data, "kidney_peaks_new.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 
 promoter_data <- read.table("fake_bed.csv",sep=',')[-1,]
 promoter_data$V2 <- as.integer(promoter_data$V2)
 promoter_data$V3 <- as.integer(promoter_data$V3)
-write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
+#write.table(promoter_data, "promoter_new.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 ```
 
 # Intersect peaks with promoter region
 ```{r}
 combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
-
+# sortbed -i kidney_peaks_new.bed > kidney_peaks_sorted_new.bed
+# bedtools merge -i kidney_peaks_sorted_new.bed > kidney_overlap_check_new.bed
+# Merge shows no overlaps! Yay!
 # bedtools intersect -a kidney_peaks.bed -b promoter.bed -wa > intersect.bed
 
 promoter_peaks <- read.table("intersect.bed",sep="\t")
@@ -416,6 +422,359 @@ fgseaRes <- fgsea(pathways,
 
 ```
 
+
+```{r}
+annotation_concise2 <- ATAC_FEATURE_ANNOT %>% select("feature_ID","ensembl_gene")
+
+# Join our data frame of our peaks with annotated data
+combined_data_gene <- left_join(annotation_concise2, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+rownames(combined_data_gene) <- combined_data_gene$feature_ID
+combined_data_gene <- combined_data_gene %>% select(-c("feature_ID"))
+```
+
+
+```{r}
+grouped <- aggregate(. ~ ensembl_gene, combined_data_gene, sum)
+rownames(grouped) <- grouped$ensembl_gene
+grouped <- grouped %>% select(-c("ensembl_gene"))
+```
+
+```{r}
+filtered_raw_countsf <- filtered_raw_counts
+filtered_raw_countsf$feature_ID <- rownames(filtered_raw_counts)
+combined_data_genef <- left_join(filtered_raw_countsf, annotation_concise2)
+rownames(combined_data_genef) <- combined_data_genef$feature_ID
+combined_data_genef <- combined_data_genef %>% select(-c("feature_ID"))
+groupedf <- aggregate(. ~ ensembl_gene, combined_data_genef, sum)
+rownames(groupedf) <- groupedf$ensembl_gene
+groupedf <- groupedf %>% select(-c("ensembl_gene"))
+```
+
+
+```{r}
+# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
+# Filter for phenodata for kidney samples in filtered raw counts
+sampleIDs<-colnames(grouped)
+
+kidney_PHENO<-PHENO %>% 
+  filter(rownames(PHENO) %in% sampleIDs)
+
+# Make sure order of samples is the same
+kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+
+rownames(kidney_PHENO) == colnames(grouped)
+
+head(grouped)
+dim(kidney_PHENO)
+
+# Run DESeq2 on filtered raw counts and phenodata
+dds <- DESeqDataSetFromMatrix(countData = grouped, 
+                              colData = kidney_PHENO,
+                              design = ~sex + group)
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+summary(res)
+
+plotMA(res)
+
+# Look at contrasts between groups
+unique(PHENO$group)
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1w <-results(dds, contrast=c("group","control","1w")) 
+summary(control_1w)
+head(control_1w[order(control_1w$padj),], 10)
+
+
+# Control vs. 2 week
+control_2w <- results(dds, contrast=c("group", "control", "2w"))
+head(control_2w[order(control_2w$padj),], 10)
+
+
+# Control vs. 8 week
+control_8w <- results(dds, contrast=c("group", "control", "8w"), tidy = TRUE)
+summary(control_8w)
+head(control_8w[order(control_8w$padj, decreasing = FALSE),], 10)
+
+
+#Volcano for Control vs. 8 week
+control_8w <- control_8w[order(res$padj),]
+rownames(control_8w) <- control_8w$row
+head(control_8w)
+
+EnhancedVolcano(control_8w,
+    lab = rownames(control_8w),
+    x = 'log2FoldChange',
+    y = 'padj')
+
+```
+
+
+
+
+
+```{r}
+# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
+# Filter for phenodata for kidney samples in filtered raw counts
+sampleIDs<-colnames(ATAC_KIDNEY_RAW_COUNTS)
+
+raw_counts_all <- ATAC_KIDNEY_RAW_COUNTS
+rownames(raw_counts_all) <- raw_counts_all$feature_ID
+raw_counts_all <- raw_counts_all[,-c(1:4)]
+
+
+kidney_PHENO<-PHENO %>% 
+  filter(rownames(PHENO) %in% sampleIDs)
+
+# Make sure order of samples is the same
+kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+
+rownames(kidney_PHENO) == colnames(raw_counts_all)
+
+head(grouped)
+dim(kidney_PHENO)
+
+# Run DESeq2 on filtered raw counts and phenodata
+dds <- DESeqDataSetFromMatrix(countData = raw_counts_all, 
+                              colData = kidney_PHENO,
+                              design = ~group)
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+summary(res)
+
+plotMA(res)
+
+# Look at contrasts between groups
+unique(PHENO$group)
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1w <-results(dds, contrast=c("group","control","1w")) 
+summary(control_1w)
+head(control_1w[order(control_1w$padj),], 10)
+
+
+# Control vs. 2 week
+control_2w <- results(dds, contrast=c("group", "control", "2w"))
+head(control_2w[order(control_2w$padj),], 10)
+
+
+# Control vs. 8 week
+control_8w <- results(dds, contrast=c("group", "control", "8w"))
+summary(control_8w)
+head(control_8w[order(control_8w$padj, decreasing = FALSE),], 10)
+
+
+#Volcano for Control vs. 8 week
+control_8w <- control_8w[order(res$padj),]
+rownames(control_8w) <- control_8w$row
+head(control_8w)
+
+EnhancedVolcano(control_8w,
+    lab = rownames(control_8w),
+    x = 'log2FoldChange',
+    y = 'padj')
+
+```
+# Use Limma
+
+```{r limma}
+
+
+
+library(edgeR)
+
+
+
+# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
+
+design <- model.matrix(~0+female_samples$group)
+
+colnames(design) <-c("oneweek", "twoweek", "fourweek", "eightweek", "control")
+
+design
+
+
+
+# Specify contrasts with makeContrasts()
+
+contr.matrix <- makeContrasts(
+
+   control_vs_eight = control - eightweek,
+
+   control_vs_four = control - fourweek,
+
+   control_vs_two = control - twoweek,
+
+   control_vs_one = control - oneweek,
+
+   levels = colnames(design))
+
+contr.matrix
+
+
+
+#In limma, linear modelling is carried out on the log-CPM values which are assumed to be normally distributed and the mean-variance relationship is accommodated using precision weights calculated by the voom function.
+
+v<-voom(female_kidney, design=design, plot=TRUE)
+
+vfit <- lmFit(v, design)
+
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit)
+
+summary(decideTests(efit))
+
+
+
+# View top DEGs with topTreat()
+
+
+```
+
+```{r}
+#raw_counts_concise <- raw_counts_all[!grepl("AABR", row.names(raw_counts_all)),]
+#raw_counts_concise <- raw_counts_concise[!grepl("KL", row.names(raw_counts_concise)),]
+
+female_samples <- kidney_PHENO %>% filter(sex == 'female')
+male_samples <- kidney_PHENO %>% filter(sex == 'male')
+
+female_kidney <- raw_counts_concise %>% select(any_of(rownames(female_samples)))
+male_kidney <- raw_counts_concise %>% select(any_of(rownames(male_samples)))
+
+```
+
+
+
+
+```{r}
+library(biomaRt)
+mart <- useDataset("rnorvegicus_gene_ensembl", mart=useMart("ensembl"))
+bm <- getBM(attributes=c("ensembl_gene_id", "hsapiens_homolog_associated_gene_name"), mart=mart) %>%
+  distinct() %>%
+  as_tibble()
+bm
+
+```
+
+
+```{r}
+control_8w
+res <- inner_join(control_8w, bm, by=c("row"="ensembl_gene_id"))
+res2 <- res %>% 
+  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
+  distinct() %>% 
+  group_by(hsapiens_homolog_associated_gene_name) %>% 
+  summarize(stat=mean(stat)) %>% 
+  filter(hsapiens_homolog_associated_gene_name != "")
+```
+
+```{r}
+library(fgsea)
+ranks <- deframe(res2)
+pathways.hallmark <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
+
+fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
+head(fgsea_results, 10)
+```
+
+```{r}
+fgsea_results_sorted <- fgsea_results %>% arrange(NES)
+ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
+  scale_y_discrete(limits=fgsea_results_sorted$pathway) +
+  geom_col(aes(fill=padj<0.05)) +
+  theme(text = element_text(size = 6)) 
+```
+```{r}
+library(fgsea)
+ranks <- deframe(res2)
+pathways.hallmark2 <- gmtPathways("c5.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes2 <- fgsea(pathways=pathways.hallmark2, stats=ranks)
+
+fgsea_results2 <- as.data.frame(fgseaRes2) %>% arrange(padj)
+head(fgsea_results2, 10)
+```
+
+```{r}
+# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
+# Filter for phenodata for kidney samples in filtered raw counts
+sampleIDs<-colnames(groupedf)
+
+kidney_PHENO<-PHENO %>% 
+  filter(rownames(PHENO) %in% sampleIDs)
+
+# Make sure order of samples is the same
+kidney_PHENO<-arrange(kidney_PHENO, viallabel)
+
+rownames(kidney_PHENO) == colnames(groupedf)
+
+head(groupedf)
+dim(kidney_PHENO)
+
+# Run DESeq2 on filtered raw counts and phenodata
+ddsf <- DESeqDataSetFromMatrix(countData = groupedf, 
+                              colData = kidney_PHENO,
+                              design = ~sex + group)
+
+ddsf <- DESeq(ddsf)
+
+resf <- results(ddsf)
+
+summary(resf)
+
+plotMA(resf)
+
+# Look at contrasts between groups
+unique(PHENO$group)
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1wf <-results(ddsf, contrast=c("group","control","1w")) 
+summary(control_1wf)
+head(control_1wf[order(control_1wf$padj),], 10)
+
+
+# Control vs. 2 week
+control_2wf <- results(ddsf, contrast=c("group", "control", "2w"))
+head(control_2wf[order(control_2wf$padj),], 10)
+
+
+# Control vs. 8 week
+control_8wf <- results(ddsf, contrast=c("group", "control", "8w"), tidy = TRUE)
+summary(control_8wf)
+head(control_8wf[order(control_8wf$padj, decreasing = FALSE),], 10)
+```
+
+```{r}
+control_8wf
+resf <- inner_join(control_8wf, bm, by=c("row"="ensembl_gene_id"))
+res2f <- resf %>% 
+  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
+  distinct() %>% 
+  group_by(hsapiens_homolog_associated_gene_name) %>% 
+  summarize(stat=mean(stat)) %>% 
+  filter(hsapiens_homolog_associated_gene_name != "")
+```
+
+```{r}
+library(fgsea)
+ranksf <- deframe(res2f)
+pathways.hallmarkf <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaResf <- fgsea(pathways=pathways.hallmarkf, stats=ranksf)
+
+fgsea_resultsf <- as.data.frame(fgseaResf) %>% arrange(padj)
+head(fgsea_results, 10)
+
+```
 
 
 
