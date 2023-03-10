@@ -59,7 +59,7 @@ Compare DESeq2, limma, and wilcoxon rank sum output.
 Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 ```{r kidneydata}
 
-setwd("/Users/aubreyroberts/Documents/GitHub/biods205/")
+#setwd("/Users/aubreyroberts/Documents/biods205_proj/")
 
 kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
 kidney_raw<-load(file="ATAC_KIDNEY_RAW_COUNTS.rda")
@@ -136,7 +136,7 @@ bed_data <- annotation_concise %>% select(-c("feature_ID"))
 bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 bed_data$start <- as.integer(bed_data$start)
 bed_data$end <- as.integer(bed_data$end)
-write.table(bed_data, "kidney_peaks.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
+#write.table(bed_data, "kidney_peaks_new.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 
 promoter_data <- read.table("fake_bed.csv",sep=',')[-1,]
 promoter_data$V2 <- as.integer(promoter_data$V2)
@@ -146,7 +146,9 @@ write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names 
 # Intersect peaks with promoter region
 
 combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
-
+# sortbed -i kidney_peaks_new.bed > kidney_peaks_sorted_new.bed
+# bedtools merge -i kidney_peaks_sorted_new.bed > kidney_overlap_check_new.bed
+# Merge shows no overlaps! Yay!
 # bedtools intersect -a kidney_peaks.bed -b promoter.bed -wa > intersect.bed
 
 promoter_peaks <- read.table("intersect.bed",sep="\t")
