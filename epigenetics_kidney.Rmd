@@ -64,7 +64,7 @@ Download and load in epigenetic data from MoTrPAC package website: https://githu
 kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
 kidney_raw<-load(file="ATAC_KIDNEY_RAW_COUNTS.rda")
 annotation<-load(file="ATAC_FEATURE_ANNOT.rda")
-dea_results<-load(file="ATAC_KIDNEY_DA.rda")
+#dea_results<-load(file="ATAC_KIDNEY_DA.rda")
 
 # We now have loaded in two new frames of counts:
 
@@ -506,7 +506,7 @@ for (i in seq(length(allgenes))){
   # calculate log2fc between control and 4 wk
   gene <- allgenes[i]
   control <- as.numeric(filtered_norm_counts[i,controlids])
-  wk4 <- as.numeric(ATAC_KIDNEY_NORM_DATA[i,week4_ids])
+  wk4 <- as.numeric(filtered_norm_counts[i,week4_ids])
   log2fc <- mean(control) - mean(wk4)   #log(control/wk4) = log(control)-log(4wk)
   
   # wilcoxon rank sums - outputs tstatistic and pvalue; extract pvalue
@@ -541,7 +541,7 @@ EnhancedVolcano(dfstats,
 # GSEA - See Sophie's code instead. Just notes below.
 Fast preranked gene set enrichment analysis (GSEA) with LFC of genes
 ```{r gsea}
-library(fgsea)
+
 # Good resource: https://bioinformatics-core-shared-training.github.io/RNAseq_September_2019/html/06_Gene_set_testing.html#fgsea
 
 # Step 1: Ranking Data. Provide fgsea a vector containing numeric data by which it should rank the genes. 
@@ -578,7 +578,6 @@ ATAC_KIDNEY_RAW_COUNTS$feature_ID<-NULL
 # Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
 full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
 design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
-design
 
 # Limma model
 v = voom(ATAC_KIDNEY_RAW_COUNTS, design, normalize.method="quantile")
