@@ -547,17 +547,16 @@ library(fgsea)
 # Step 1: Ranking Data. Provide fgsea a vector containing numeric data by which it should rank the genes. 
 # We can rank based on fold change.
 
-rankData<-top.table$logFC
-names(rankData) <- rownames(top.table)
+#rankData<-top.table$logFC
+#names(rankData) <- rownames(top.table)
 
 # Step 2: Load in pathways (external source?)
 
 # Step 3: Conduct analysis
-fgseaRes <- fgsea(pathways,
-                  rankData,
-                  minSize = 15,
-                  maxSize = 500,
-                  nperm = 1000)
+#fgseaRes <- fgsea(pathways,
+                 # rankData,
+                 # minSize = 15,
+                 # maxSize = 500,
 
 # use plotEnrichment() later to plot enrichment scores
 # use plotGseaTable() to plot a summary figure showing pathways
