@@ -1,5 +1,5 @@
 ---
-title: "epigenetics"
+title: "Epigenetics -  Kidney"
 author: "Aubrey Roberts"
 date: "2023-02-26"
 output: html_document
@@ -11,35 +11,30 @@ library(tidyverse)
 library(ggplot2)
 library(seqinr)
 library(DESeq2)
-<<<<<<< Updated upstream
 library(EnhancedVolcano)
 library(edgeR)
 library(fgsea)
 library(data.table)
-=======
-#library(EnhancedVolcano)
->>>>>>> Stashed changes
 
 # Access MoTrPAC data from this package
 library(MotrpacRatTraining6moData)
 library(MotrpacRatTraining6mo)
+
 ```
 
-# Notes
-```{r dict}
+# Background:
+
 # We will look at chromatin accessibility (ATAC) and DNA methylation (METHYL). 
 
-# DICTIONARY:
-
 # Available data: 8 different tissues have ATAC data:
-# HIPPOC: hippocampus
-# BAT: brown adipose tissue
-# HEART: heart
-# LUNG: lung
-# LIVER: liver
-# WAT-SC: subcutaneous white adipose tissue
-# KIDNEY: kidney
-# SKM_GN: gastrocnemius (leg skeletal muscle)
+HIPPOC: hippocampus
+BAT: brown adipose tissue
+HEART: heart
+LUNG: lung
+LIVER: liver
+WAT-SC: subcutaneous white adipose tissue
+KIDNEY: kidney
+SKM_GN: gastrocnemius (leg skeletal muscle)
 
 # ATAC: chromatin accessibility
 # METHYL: DNA methylation, RRBS data
@@ -47,44 +42,42 @@ library(MotrpacRatTraining6mo)
 
 # ANALYSIS PLAN:
 
-# 1) Do PCA plot with response to exercise as the focus ("group"); make it color gradient not a factor -- pick tissue with biggest exercise separation gradient (control vs. 1 vs 2. vs. 4 vs. 8 weeks). We chose kidney tissue.
+1) Do *PCA plot* with response to exercise as the focus ("group"); make it color gradient not a factor -- pick tissue with biggest exercise separation gradient (control vs. 1 vs 2. vs. 4 vs. 8 weeks). We chose kidney tissue.
 
-# 2) Use table browser from UCSC. Download promoter regions from UCSC 1kb region upstream. Look at which of our peaks (row names) correspond to peaks near promoters. These will likely be most interesting/relevant to gene expression. Use bedtools (ask prof to share slides for bed tools).
+2) *Filter for peaks in promoter region.* Use table browser from UCSC. Download promoter regions from UCSC 1kb region upstream. Look at which of our peaks (row names) correspond to peaks near promoters. Use bedtools. These will likely be most interesting/relevant to gene expression. 
 
-# 3) Use two methods for differential peak analysis. Feed it the peaks by promoter regions we identified. 
-# a) With normalized data: wilcoxon rank sum and benj hochberg correction
-# b) With unnormalized data: DESeq2 -- does multiple hypothesis testing on everything 
+3) Try out different methods to look for *Differentially Expressed Peaks.* Feed it the peaks by promoter regions we identified. 
+          a) *DESeq2*: use unnormalized data--does multiple hypothesis testing on everything 
+          b) *Limma* / voom
+          c) *Wilcoxon rank sum* and benj hochberg correction: use normalized data
+Compare DESeq2, limma, and wilcoxon rank sum output.
 
-# 4) Look at peaks differentially open in promoter regions and do pathway analysis. Compare wilcoxon rank sum and DESeq2 output.
+4) Look at peaks differentially open in promoter regions and do *pathway analysis (GSEA)* based on LFC. 
 
-```
 
 # Load Kidney Data
+Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 ```{r kidneydata}
 
 #setwd("/Users/aubreyroberts/Documents/biods205_proj/")
 
-# Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
-
 kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
 kidney_raw<-load(file="ATAC_KIDNEY_RAW_COUNTS.rda")
 annotation<-load(file="ATAC_FEATURE_ANNOT.rda")
+#dea_results<-load(file="ATAC_KIDNEY_DA.rda")
 
 # We now have loaded in two new frames of counts:
 
 # Normalized - ATAC_KIDNEY_NORM_DATA
-
 head(ATAC_KIDNEY_NORM_DATA)
 
 # Raw - ATAC_KIDNEY_RAW_COUNTS
-
 head(ATAC_KIDNEY_RAW_COUNTS)
-
 ```
 
-# PCA plot for kidney - MAKE INTO COLOR GRADIENT
+# PCA plot for kidney 
 ```{r kidneyPCA}
-         
+
 # Create PCA plot of normalized data
 
 # First four columns are metadata, so we don't need in normalized count matrix
@@ -102,17 +95,22 @@ df = data.frame(
 
 # Plot the first two PCs
 print(ggplot(df, aes(x=PC1, y=PC2, color=group, shape=sex)) +
-  geom_point(size=3))+ggtitle("Kidney")+theme(plot.title = element_text(hjust = 0.5))
+  geom_point(size=3))+
+  ggtitle("Kidney")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_color_manual(values=GROUP_COLORS)
 
 ```
-# Select for peaks of interest (near promoter regions)
-```{r}
 
+# Filter for peaks near promoter regions. 
+Use UCSC genome browser file and bedtools. Filter dataset for promoter peaks.
+```{r}
 # Filter for peaks of interest near promoters:
 
-# Ideally, we will filter for peaks in promoter region before this -- then do differential expression below.
 # Use "upstream1000.fa.gz" file from UCSC genome browser: https://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/ to filter for peaks of interest in promoter regions
+
 # Need to convert this file into a bed file, use bedtools to see which of our peaks fall in given regions in file.
+
 # Then feed these peaks of interest into DESeq2.
 
 # Load annotated peak data
@@ -132,10 +130,8 @@ all(annotation_concise$feature_ID)
 head(ATAC_KIDNEY_RAW_COUNTS)
 head(annotation_concise)
 
-```
-
 # Prepare bed files
-```{r}
+
 bed_data <- annotation_concise %>% select(-c("feature_ID"))
 bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 bed_data$start <- as.integer(bed_data$start)
@@ -145,11 +141,10 @@ bed_data$end <- as.integer(bed_data$end)
 promoter_data <- read.table("fake_bed.csv",sep=',')[-1,]
 promoter_data$V2 <- as.integer(promoter_data$V2)
 promoter_data$V3 <- as.integer(promoter_data$V3)
-#write.table(promoter_data, "promoter_new.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
-```
+write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 
 # Intersect peaks with promoter region
-```{r}
+
 combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 # sortbed -i kidney_peaks_new.bed > kidney_peaks_sorted_new.bed
 # bedtools merge -i kidney_peaks_sorted_new.bed > kidney_overlap_check_new.bed
@@ -161,11 +156,7 @@ colnames(promoter_peaks) <- c("chrom","start","end")
 
 filtered_peaks <- left_join(promoter_peaks, combined_data)
 
-```
-
-# Keep peaks that overlap with promoter region
-```{r}
-# Filter for peaks of interest
+# Keep peaks that overlap with promoter region/filter for peaks of interest:
 
 filtered_peaks_dist <- filtered_peaks %>% distinct()
 
@@ -179,9 +170,10 @@ dim(filtered_raw_counts)
 
 ```
 
-# Run DESeq2 for differential expression of promoter peaks
+# Prep for DESeq2
+Make sure phenotype and count data line up. Subset data for separate analyses of male vs. female.
 ```{r deseq}
-# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
+
 # Filter for phenodata for kidney samples in filtered raw counts
 sampleIDs<-colnames(filtered_raw_counts)
 
@@ -193,13 +185,40 @@ kidney_PHENO<-arrange(kidney_PHENO, viallabel)
 
 rownames(kidney_PHENO) == colnames(filtered_raw_counts)
 
-head(filtered_raw_counts)
-dim(kidney_PHENO)
 
+# Add metadata covariates (includes Sample_batch, ...frip) to kidney_PHENO
+
+rownames(ATAC_META)<-ATAC_META$viallabel
+ATAC_META$viallabel <- NULL
+
+sampleIDs<-rownames(kidney_PHENO)
+kidney_META<-ATAC_META[rownames(ATAC_META) %in% sampleIDs,]
+
+any(rownames(kidney_META) != rownames(kidney_PHENO))
+
+kidney_PHENO2<-cbind(kidney_META, kidney_PHENO)
+
+# Subset female and male IDs
+
+female<-kidney_PHENO2 %>% 
+  filter(sex == "female")
+femaleIDs<-rownames(female)
+
+male<-kidney_PHENO2 %>% 
+  filter(sex == "male")
+maleIDs<-rownames(male)
+
+# Subset filtered_raw_counts to female and male
+female_filtered_raw_counts<-filtered_raw_counts[colnames(filtered_raw_counts) %in% femaleIDs]
+male_filtered_raw_counts<-filtered_raw_counts[colnames(filtered_raw_counts) %in% maleIDs]
+```
+# DESeq2 for differential expression of promoter peaks (Both Sexes)
+Note: No significant results.
+```{r de}
 # Run DESeq2 on filtered raw counts and phenodata
 dds <- DESeqDataSetFromMatrix(countData = filtered_raw_counts, 
-                              colData = kidney_PHENO,
-                              design = ~group)
+                              colData = kidney_PHENO2,
+                              design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+sex+sex*group+group)
 
 dds <- DESeq(dds)
 
@@ -207,10 +226,7 @@ res <- results(dds)
 
 summary(res)
 
-plotMA(res)
-
 # Look at contrasts between groups
-unique(PHENO$group)
 
 # Control vs. 1 wk: results and top 10 by adjusted p-value
 
@@ -221,14 +237,18 @@ head(control_1w[order(control_1w$padj),], 10)
 
 # Control vs. 2 week
 control_2w <- results(dds, contrast=c("group", "control", "2w"))
+summary(control_2w)
 head(control_2w[order(control_2w$padj),], 10)
 
+# Control vs. 4 week
+control_4w <- results(dds, contrast=c("group", "control", "4w"))
+summary(control_4w)
+head(control_4w[order(control_4w$padj),], 10)
 
 # Control vs. 8 week
 control_8w <- results(dds, contrast=c("group", "control", "8w"))
 summary(control_8w)
 head(control_8w[order(control_8w$padj),], 10)
-
 
 #Volcano for Control vs. 8 week
 control_8w <- control_8w[order(res$padj),]
@@ -242,70 +262,193 @@ EnhancedVolcano(control_8w,
 
 ```
 
+# DESeq2 for female and male separately
+*Note: 1 significant upregulated peak in female at 4 weeks: chrY:554247-554590; none for males.*
+```{r separate}
 
-# Moving forward...
-```{r}
-## INSTRUCTIONS FOR HOW TO PROCEED:
+# Female - DESeq2
+dds <- DESeqDataSetFromMatrix(countData = female_filtered_raw_counts, 
+                              colData = female,
+                              design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+group)
 
-# 1) INTERSECT the FDR normalized peaks with the promoter region to see if those 237 regions are in promoter --- DONE.
-# 237 DEGs from main paper
+dds <- DESeq(dds)
+res <- results(dds)
+summary(res)
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1w <-results(dds, contrast=c("group","control","1w")) 
+summary(control_1w)
+head(control_1w[order(control_1w$padj),], 10)
+
+# Control vs. 2 week
+control_2w <- results(dds, contrast=c("group", "control", "2w"))
+summary(control_2w)
+head(control_2w[order(control_2w$padj),], 10)
+
+# Control vs. 4 week
+control_4w <- results(dds, contrast=c("group", "control", "4w"))
+summary(control_4w)
+head(control_4w[order(control_4w$padj),], 10)
+
+# Control vs. 8 week
+control_8w <- results(dds, contrast=c("group", "control", "8w"))
+summary(control_8w)
+head(control_8w[order(control_8w$padj),], 10)
+
+
+# Male - DESeq2
+dds <- DESeqDataSetFromMatrix(countData = male_filtered_raw_counts, 
+                              colData = male,
+                              design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+group)
+
+dds <- DESeq(dds)
+res <- results(dds)
+summary(res)
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1w <-results(dds, contrast=c("group","control","1w")) 
+summary(control_1w)
+head(control_1w[order(control_1w$padj),], 10)
+
+# Control vs. 2 week
+control_2w <- results(dds, contrast=c("group", "control", "2w"))
+summary(control_2w)
+head(control_2w[order(control_2w$padj),], 10)
+
+# Control vs. 4 week
+control_4w <- results(dds, contrast=c("group", "control", "4w"))
+summary(control_4w)
+head(control_4w[order(control_4w$padj),], 10)
+
+# Control vs. 8 week
+control_8w <- results(dds, contrast=c("group", "control", "8w"))
+summary(control_8w)
+head(control_8w[order(control_8w$padj),], 10)
+
+```
+
+# We didn't find much with DESeq2.
+
+# Moving forward...things to try:
+
+1a) INTERSECT the FDR normalized peaks with the promoter region to see if those 237 regions are in promoter --- DONE.
+There are 237 DEGs from main paper. We found that only 6 of these were in promoter region.
+
 any(filtered_raw_counts[ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID,])
-# 6 DEGs they found are in promoter region -- they used limma on all features?
 sum(ATAC_KIDNEY_NORM_DATA_05FDR$feature_ID %in% rownames(filtered_raw_counts))
 
-# 1) troubleshoot PREPROCESS for DESeq2 - need to do some normalization; size factor adjustment/normalization
+1b) Look up how they did limma for MoTrPAC and got the DE peaks. Try to reproduce analysis and get at least 6 DE peaks with limma.
 
-# 2) DO WILCOXON FOLLOWED BY BENJ HOCH -- DONE.
+2) Troubleshoot / PREPROCESS for DESeq2 - need to do some normalization; size factor adjustment/normalization.
 
-# 3) limma or edgeR for bulk atac seq as well
+3) DO WILCOXON FOLLOWED BY BENJ HOCH -- DONE.
 
-# 4) compare the techniques
+4) Try limma or edgeR as well.
 
-# 5) bed merge - can look for overlapping segments in our kidney data; sum the peaks and exclude overlapping peaks; tool in bedtools to sum to get single value for gene --- DONE.
+5) Compare the techniques.
+
+6) Bed merge - can look for overlapping segments in our kidney data; sum the peaks and exclude overlapping peaks; tool in bedtools to sum to get single value for gene --- DONE.
+We found that there is not overlap which is good.
+
+7) Use prerank GSEA -- log fold change for unique genes (collapse all peaks into unique genes first); see if any gene sets are more skewed to one phenotype/timepoint. (fgsea package).
 
 
-## 3/7/23 Notes:
-# try wilcoxin rank sum on promoter region AND all peaks (even non-promoter)?
-# prerank GSEA -- log fold change for unique genes (collapse all peaks into unique genes first); see if any gene sets are more skewed to one phenotype/timepoint
-# fgsea package?
-# Look up how they did limma for MoTrPAC and got the DE peaks
-```
-# LIMMA
-```{r limma}
+# Limma - try to reproduce MoTrPAC findings.
+Try to replicate original MoTrPAC findings with limma:
+1) use normalize.method="quantile" in voom
+2) use model with covariates (sex, sample_batch, and peak_enrich.frac_reads_in_peaks.macs2.frip, and/or sex*group interaction)
+No significant findings for male and female together for promoter peaks.
+```{r limmarepro}
+
+# Convert to factor
+kidney_PHENO2$Sample_batch<-as.factor(kidney_PHENO2$Sample_batch)
 
 # Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
-design <- model.matrix(~0+kidney_PHENO$group+kidney_PHENO$sex)
-colnames(design) <-c("oneweek", "twoweek", "fourweek", "eightweek", "control", "male")
+full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
 design
 
-# Specify contrasts with makeContrasts()
-contr.matrix <- makeContrasts(
-   control_vs_eight = control - eightweek,
-   control_vs_four = control - fourweek,
-   control_vs_two = control - twoweek,
-   control_vs_one = control - oneweek,
-   levels = colnames(design))
-contr.matrix
+# Limma model
+v = voom(filtered_raw_counts, design, normalize.method="quantile")
+limma_model1 = lmFit(v, design)
 
-#In limma, linear modelling is carried out on the log-CPM values which are assumed to be normally distributed and the mean-variance relationship is accommodated using precision weights calculated by the voom function.
-v<-voom(filtered_raw_counts, design=design, plot=TRUE)
-vfit <- lmFit(v, design)
-vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
-efit <- eBayes(vfit)
-summary(decideTests(efit))
+# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"  "sexmale:group2w"  "sexmale:group4w" "sexmale:group8w" "sexmale:groupcontrol"
+limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
 
-# View top DEGs with topTreat()
-topTreat(efit)
+eb_Ftest1 = eBayes(limma_fit1)
+res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
 
 # Highest log fold changes:
-top.table<-topTreat(efit, sort.by = "logFC", n=Inf)
+top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
 head(top.table)
 length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
 
 ```
 
-# NORMALIZATION
-# Normalize filtered_raw_counts to "filtered_norm_counts" for Wilcoxin rank sum (adapted from Bootcamp)
+# Limma for female alone
+```{r limma_sex}
+
+# Convert to factor
+female$Sample_batch<-as.factor(female$Sample_batch)
+
+# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
+full_model_str = "~ 1 +  group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+design = model.matrix(as.formula(full_model_str), data=female)
+design
+
+# Limma model
+v = voom(female_filtered_raw_counts, design, normalize.method="quantile")
+limma_model1 = lmFit(v, design)
+
+# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"
+
+limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
+
+eb_Ftest1 = eBayes(limma_fit1)
+res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
+
+# Highest log fold changes:
+top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
+head(top.table)
+length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
+
+```
+
+
+# Limma for male alone
+```{r limma_sex}
+
+# Convert to factor
+male$Sample_batch<-as.factor(male$Sample_batch)
+
+# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
+full_model_str = "~ 1 +  group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+design = model.matrix(as.formula(full_model_str), data=male)
+design
+
+# Limma model
+v = voom(male_filtered_raw_counts, design, normalize.method="quantile")
+limma_model1 = lmFit(v, design)
+
+# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"
+
+limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
+
+eb_Ftest1 = eBayes(limma_fit1)
+res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
+
+# Highest log fold changes:
+top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
+head(top.table)
+length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
+
+```
+
+
+# Normalization prior to Wilcoxon Rank Sum
+Normalize filtered_raw_counts to "filtered_norm_counts" for Wilcoxin rank sum (adapted from Bootcamp)
 ```{r}
 # Remove genes with 0 counts in ALL samples
 # sum gene expression across samples
@@ -336,8 +479,9 @@ head(filtered_norm_counts)
 
 ```
 
-# WILCOXON RANK SUM
-# Differential Expression with two-sided Wilcoxon rank sums test followed by Benjamini-Hochberg adjustment of p-values
+# Wilcoxon Rank Sum Test
+
+Differential Expression with two-sided Wilcoxon rank sums test followed by Benjamini-Hochberg adjustment of p-values
 ```{r wilcox}
 # Want to use normalized data for this.
 
@@ -356,13 +500,13 @@ week8_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="8w",])
 
 todf <- list()
 # for loop through all genes
-allgenes <- rownames(ATAC_KIDNEY_NORM_DATA)
+allgenes <- rownames(filtered_norm_counts)
 for (i in seq(length(allgenes))){
   
   # calculate log2fc between control and 4 wk
   gene <- allgenes[i]
-  control <- as.numeric(ATAC_KIDNEY_NORM_DATA[i,controlids])
-  wk4 <- as.numeric(ATAC_KIDNEY_NORM_DATA[i,week4_ids])
+  control <- as.numeric(filtered_norm_counts[i,controlids])
+  wk4 <- as.numeric(filtered_norm_counts[i,week4_ids])
   log2fc <- mean(control) - mean(wk4)   #log(control/wk4) = log(control)-log(4wk)
   
   # wilcoxon rank sums - outputs tstatistic and pvalue; extract pvalue
@@ -394,396 +538,65 @@ EnhancedVolcano(dfstats,
     title = 'Differential Expression Control/4wk')
 ```
 
-# GSEA
-# Fast preranked gene set enrichment analysis (GSEA) with LFC of genes
+# GSEA - See Sophie's code instead. Just notes below.
+Fast preranked gene set enrichment analysis (GSEA) with LFC of genes
 ```{r gsea}
 
-library(fgsea)
 # Good resource: https://bioinformatics-core-shared-training.github.io/RNAseq_September_2019/html/06_Gene_set_testing.html#fgsea
 
 # Step 1: Ranking Data. Provide fgsea a vector containing numeric data by which it should rank the genes. 
 # We can rank based on fold change.
 
-rankData<-top.table$logFC
-names(rankData) <- rownames(top.table)
+#rankData<-top.table$logFC
+#names(rankData) <- rownames(top.table)
 
 # Step 2: Load in pathways (external source?)
 
 # Step 3: Conduct analysis
-fgseaRes <- fgsea(pathways,
-                  rankData,
-                  minSize = 15,
-                  maxSize = 500,
-                  nperm = 1000)
+#fgseaRes <- fgsea(pathways,
+                 # rankData,
+                 # minSize = 15,
+                 # maxSize = 500,
 
 # use plotEnrichment() later to plot enrichment scores
 # use plotGseaTable() to plot a summary figure showing pathways
 
-
 ```
 
-
+# Limma on all peaks, not just promoter
 ```{r}
-annotation_concise2 <- ATAC_FEATURE_ANNOT %>% select("feature_ID","ensembl_gene")
 
-# Join our data frame of our peaks with annotated data
-combined_data_gene <- left_join(annotation_concise2, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
-rownames(combined_data_gene) <- combined_data_gene$feature_ID
-combined_data_gene <- combined_data_gene %>% select(-c("feature_ID"))
-```
+# Use all normalized data (not filtered for promoter peaks): NORM_DATA_full
 
+ATAC_KIDNEY_RAW_COUNTS<-ATAC_KIDNEY_RAW_COUNTS %>% 
+  select(-c(1,3:4))
+rownames(ATAC_KIDNEY_RAW_COUNTS)<-ATAC_KIDNEY_RAW_COUNTS$feature_ID
+ATAC_KIDNEY_RAW_COUNTS$feature_ID<-NULL
 
-```{r}
-grouped <- aggregate(. ~ ensembl_gene, combined_data_gene, sum)
-rownames(grouped) <- grouped$ensembl_gene
-grouped <- grouped %>% select(-c("ensembl_gene"))
-```
-
-```{r}
-filtered_raw_countsf <- filtered_raw_counts
-filtered_raw_countsf$feature_ID <- rownames(filtered_raw_counts)
-combined_data_genef <- left_join(filtered_raw_countsf, annotation_concise2)
-rownames(combined_data_genef) <- combined_data_genef$feature_ID
-combined_data_genef <- combined_data_genef %>% select(-c("feature_ID"))
-groupedf <- aggregate(. ~ ensembl_gene, combined_data_genef, sum)
-rownames(groupedf) <- groupedf$ensembl_gene
-groupedf <- groupedf %>% select(-c("ensembl_gene"))
-```
-
-
-```{r}
-# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
-# Filter for phenodata for kidney samples in filtered raw counts
-sampleIDs<-colnames(grouped)
-
-kidney_PHENO<-PHENO %>% 
-  filter(rownames(PHENO) %in% sampleIDs)
-
-# Make sure order of samples is the same
-kidney_PHENO<-arrange(kidney_PHENO, viallabel)
-
-rownames(kidney_PHENO) == colnames(grouped)
-
-head(grouped)
-dim(kidney_PHENO)
-
-# Run DESeq2 on filtered raw counts and phenodata
-dds <- DESeqDataSetFromMatrix(countData = grouped, 
-                              colData = kidney_PHENO,
-                              design = ~sex + group)
-
-dds <- DESeq(dds)
-
-res <- results(dds)
-
-summary(res)
-
-plotMA(res)
-
-# Look at contrasts between groups
-unique(PHENO$group)
-
-# Control vs. 1 wk: results and top 10 by adjusted p-value
-
-control_1w <-results(dds, contrast=c("group","control","1w")) 
-summary(control_1w)
-head(control_1w[order(control_1w$padj),], 10)
-
-
-# Control vs. 2 week
-control_2w <- results(dds, contrast=c("group", "control", "2w"))
-head(control_2w[order(control_2w$padj),], 10)
-
-
-# Control vs. 8 week
-control_8w <- results(dds, contrast=c("group", "control", "8w"), tidy = TRUE)
-summary(control_8w)
-head(control_8w[order(control_8w$padj, decreasing = FALSE),], 10)
-
-
-#Volcano for Control vs. 8 week
-control_8w <- control_8w[order(res$padj),]
-rownames(control_8w) <- control_8w$row
-head(control_8w)
-
-EnhancedVolcano(control_8w,
-    lab = rownames(control_8w),
-    x = 'log2FoldChange',
-    y = 'padj')
-
-```
-
-
-
-
-
-```{r}
-# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
-# Filter for phenodata for kidney samples in filtered raw counts
-sampleIDs<-colnames(ATAC_KIDNEY_RAW_COUNTS)
-
-raw_counts_all <- ATAC_KIDNEY_RAW_COUNTS
-rownames(raw_counts_all) <- raw_counts_all$feature_ID
-raw_counts_all <- raw_counts_all[,-c(1:4)]
-
-
-kidney_PHENO<-PHENO %>% 
-  filter(rownames(PHENO) %in% sampleIDs)
-
-# Make sure order of samples is the same
-kidney_PHENO<-arrange(kidney_PHENO, viallabel)
-
-rownames(kidney_PHENO) == colnames(raw_counts_all)
-
-head(grouped)
-dim(kidney_PHENO)
-
-# Run DESeq2 on filtered raw counts and phenodata
-dds <- DESeqDataSetFromMatrix(countData = raw_counts_all, 
-                              colData = kidney_PHENO,
-                              design = ~group)
-
-dds <- DESeq(dds)
-
-res <- results(dds)
-
-summary(res)
-
-plotMA(res)
-
-# Look at contrasts between groups
-unique(PHENO$group)
-
-# Control vs. 1 wk: results and top 10 by adjusted p-value
-
-control_1w <-results(dds, contrast=c("group","control","1w")) 
-summary(control_1w)
-head(control_1w[order(control_1w$padj),], 10)
-
-
-# Control vs. 2 week
-control_2w <- results(dds, contrast=c("group", "control", "2w"))
-head(control_2w[order(control_2w$padj),], 10)
-
-
-# Control vs. 8 week
-control_8w <- results(dds, contrast=c("group", "control", "8w"))
-summary(control_8w)
-head(control_8w[order(control_8w$padj, decreasing = FALSE),], 10)
-
-
-#Volcano for Control vs. 8 week
-control_8w <- control_8w[order(res$padj),]
-rownames(control_8w) <- control_8w$row
-head(control_8w)
-
-EnhancedVolcano(control_8w,
-    lab = rownames(control_8w),
-    x = 'log2FoldChange',
-    y = 'padj')
-
-```
-# Use Limma
-
-```{r limma}
-
-
-
-library(edgeR)
-
-
+# Use Phenotype data from kidney_PHENO2
 
 # Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
+full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
 
-design <- model.matrix(~0+female_samples$group)
+# Limma model
+v = voom(ATAC_KIDNEY_RAW_COUNTS, design, normalize.method="quantile")
+limma_model1 = lmFit(v, design)
 
-colnames(design) <-c("oneweek", "twoweek", "fourweek", "eightweek", "control")
+# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"  "sexmale:group2w"  "sexmale:group4w" "sexmale:group8w" "sexmale:groupcontrol"
+limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
 
-design
+eb_Ftest1 = eBayes(limma_fit1)
+res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
 
-
-
-# Specify contrasts with makeContrasts()
-
-contr.matrix <- makeContrasts(
-
-   control_vs_eight = control - eightweek,
-
-   control_vs_four = control - fourweek,
-
-   control_vs_two = control - twoweek,
-
-   control_vs_one = control - oneweek,
-
-   levels = colnames(design))
-
-contr.matrix
-
-
-
-#In limma, linear modelling is carried out on the log-CPM values which are assumed to be normally distributed and the mean-variance relationship is accommodated using precision weights calculated by the voom function.
-
-v<-voom(female_kidney, design=design, plot=TRUE)
-
-vfit <- lmFit(v, design)
-
-vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
-
-efit <- eBayes(vfit)
-
-summary(decideTests(efit))
-
-
-
-# View top DEGs with topTreat()
-
-
-```
-
-```{r}
-#raw_counts_concise <- raw_counts_all[!grepl("AABR", row.names(raw_counts_all)),]
-#raw_counts_concise <- raw_counts_concise[!grepl("KL", row.names(raw_counts_concise)),]
-
-female_samples <- kidney_PHENO %>% filter(sex == 'female')
-male_samples <- kidney_PHENO %>% filter(sex == 'male')
-
-female_kidney <- raw_counts_concise %>% select(any_of(rownames(female_samples)))
-male_kidney <- raw_counts_concise %>% select(any_of(rownames(male_samples)))
-
-```
-
-
-
-
-```{r}
-library(biomaRt)
-mart <- useDataset("rnorvegicus_gene_ensembl", mart=useMart("ensembl"))
-bm <- getBM(attributes=c("ensembl_gene_id", "hsapiens_homolog_associated_gene_name"), mart=mart) %>%
-  distinct() %>%
-  as_tibble()
-bm
-
-```
-
-
-```{r}
-control_8w
-res <- inner_join(control_8w, bm, by=c("row"="ensembl_gene_id"))
-res2 <- res %>% 
-  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
-  distinct() %>% 
-  group_by(hsapiens_homolog_associated_gene_name) %>% 
-  summarize(stat=mean(stat)) %>% 
-  filter(hsapiens_homolog_associated_gene_name != "")
-```
-
-```{r}
-library(fgsea)
-ranks <- deframe(res2)
-pathways.hallmark <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
-fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
-
-fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
-head(fgsea_results, 10)
-```
-
-```{r}
-fgsea_results_sorted <- fgsea_results %>% arrange(NES)
-ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
-  scale_y_discrete(limits=fgsea_results_sorted$pathway) +
-  geom_col(aes(fill=padj<0.05)) +
-  theme(text = element_text(size = 6)) 
-```
-```{r}
-library(fgsea)
-ranks <- deframe(res2)
-pathways.hallmark2 <- gmtPathways("c5.all.v2023.1.Hs.symbols.gmt.txt")
-fgseaRes2 <- fgsea(pathways=pathways.hallmark2, stats=ranks)
-
-fgsea_results2 <- as.data.frame(fgseaRes2) %>% arrange(padj)
-head(fgsea_results2, 10)
-```
-
-```{r}
-# DIFFERENTIALLY EXPRESSED PEAKS WITH DESEQ2
-# Filter for phenodata for kidney samples in filtered raw counts
-sampleIDs<-colnames(groupedf)
-
-kidney_PHENO<-PHENO %>% 
-  filter(rownames(PHENO) %in% sampleIDs)
-
-# Make sure order of samples is the same
-kidney_PHENO<-arrange(kidney_PHENO, viallabel)
-
-rownames(kidney_PHENO) == colnames(groupedf)
-
-head(groupedf)
-dim(kidney_PHENO)
-
-# Run DESeq2 on filtered raw counts and phenodata
-ddsf <- DESeqDataSetFromMatrix(countData = groupedf, 
-                              colData = kidney_PHENO,
-                              design = ~sex + group)
-
-ddsf <- DESeq(ddsf)
-
-resf <- results(ddsf)
-
-summary(resf)
-
-plotMA(resf)
-
-# Look at contrasts between groups
-unique(PHENO$group)
-
-# Control vs. 1 wk: results and top 10 by adjusted p-value
-
-control_1wf <-results(ddsf, contrast=c("group","control","1w")) 
-summary(control_1wf)
-head(control_1wf[order(control_1wf$padj),], 10)
-
-
-# Control vs. 2 week
-control_2wf <- results(ddsf, contrast=c("group", "control", "2w"))
-head(control_2wf[order(control_2wf$padj),], 10)
-
-
-# Control vs. 8 week
-control_8wf <- results(ddsf, contrast=c("group", "control", "8w"), tidy = TRUE)
-summary(control_8wf)
-head(control_8wf[order(control_8wf$padj, decreasing = FALSE),], 10)
-```
-
-```{r}
-control_8wf
-resf <- inner_join(control_8wf, bm, by=c("row"="ensembl_gene_id"))
-res2f <- resf %>% 
-  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
-  distinct() %>% 
-  group_by(hsapiens_homolog_associated_gene_name) %>% 
-  summarize(stat=mean(stat)) %>% 
-  filter(hsapiens_homolog_associated_gene_name != "")
-```
-
-```{r}
-library(fgsea)
-ranksf <- deframe(res2f)
-pathways.hallmarkf <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
-fgseaResf <- fgsea(pathways=pathways.hallmarkf, stats=ranksf)
-
-fgsea_resultsf <- as.data.frame(fgseaResf) %>% arrange(padj)
-head(fgsea_results, 10)
-
-```
-
+# Highest log fold changes:
+top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
+head(top.table)
+length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
 
 
 
 
 ```
-
-
-
-
 
 
