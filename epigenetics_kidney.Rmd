@@ -121,6 +121,7 @@ dim(ATAC_KIDNEY_RAW_COUNTS)
 
 # Join our data frame of our peaks with annotated data
 combined_data <- left_join(annotation_concise, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 
 vec<-unique(annotation_concise$feature_ID)
 all(vec %in% ATAC_KIDNEY_RAW_COUNTS$feature_ID)
@@ -130,42 +131,42 @@ all(annotation_concise$feature_ID)
 head(ATAC_KIDNEY_RAW_COUNTS)
 head(annotation_concise)
 
-# Prepare bed files
+# Prepare bed files: the code below is how we created the bed files, it is now commented out as now we just need to read in our final files that are created rather than remake them each time
 
-bed_data <- annotation_concise %>% select(-c("feature_ID"))
-bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
-bed_data$start <- as.integer(bed_data$start)
-bed_data$end <- as.integer(bed_data$end)
+# bed_data <- annotation_concise %>% select(-c("feature_ID"))
+# bed_data <- bed_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
+# bed_data$start <- as.integer(bed_data$start)
+# bed_data$end <- as.integer(bed_data$end)
 #write.table(bed_data, "kidney_peaks_new.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 
-promoter_data <- read.table("fake_bed.csv",sep=',')[-1,]
-promoter_data$V2 <- as.integer(promoter_data$V2)
-promoter_data$V3 <- as.integer(promoter_data$V3)
-write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
+# fake_bed.csv is created by parsing the UCSC genome browser FASTA file for sequences within 1000 bp of promoters to extract the chromosome, start, and end location 
+
+# promoter_data <- read.table("fake_bed.csv",sep=',')[-1,]
+# promoter_data$V2 <- as.integer(promoter_data$V2)
+# promoter_data$V3 <- as.integer(promoter_data$V3)
+# write.table(promoter_data, "promoter.bed", sep="\t", col.names=FALSE, row.names = FALSE, append = TRUE, quote = FALSE) 
 
 # Intersect peaks with promoter region
+# Line for intersection: bedtools intersect -a kidney_peaks.bed -b promoter.bed -wa > intersect.bed
+# promoter_peaks <- read.table("intersect.bed",sep="\t")
+# colnames(promoter_peaks) <- c("chrom","start","end")
 
-combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
+# We also checked if there is any overlap in our peaks
+# combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 # sortbed -i kidney_peaks_new.bed > kidney_peaks_sorted_new.bed
 # bedtools merge -i kidney_peaks_sorted_new.bed > kidney_overlap_check_new.bed
 # Merge shows no overlaps! Yay!
-# bedtools intersect -a kidney_peaks.bed -b promoter.bed -wa > intersect.bed
 
-promoter_peaks <- read.table("intersect.bed",sep="\t")
-colnames(promoter_peaks) <- c("chrom","start","end")
-
-filtered_peaks <- left_join(promoter_peaks, combined_data)
 
 # Keep peaks that overlap with promoter region/filter for peaks of interest:
-
+promoter_peaks <- read.table("atac_promoter_peaks.bed")
+colnames(promoter_peaks) <- c("chrom","start","end")
+filtered_peaks <- left_join(promoter_peaks, combined_data)
 filtered_peaks_dist <- filtered_peaks %>% distinct()
 
 # Set features to rownames to format filtered raw counts for DESeq2
-
 rownames(filtered_peaks_dist) <- filtered_peaks_dist$feature_ID
-
 filtered_raw_counts <- filtered_peaks_dist[,-c(1:4)]
-
 dim(filtered_raw_counts)
 
 ```
@@ -295,7 +296,9 @@ head(control_4w[order(control_4w$padj),], 10)
 control_8w <- results(dds, contrast=c("group", "control", "8w"))
 summary(control_8w)
 head(control_8w[order(control_8w$padj),], 10)
+```
 
+```{r}
 
 # Male - DESeq2
 dds <- DESeqDataSetFromMatrix(countData = male_filtered_raw_counts, 
@@ -598,5 +601,260 @@ length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
 
 
 ```
+
+
+Now we try grouping peaks by their nearest gene
+```{r}
+feature_ensembl <- ATAC_FEATURE_ANNOT %>% select("feature_ID","ensembl_gene")
+
+# Join the peaks with the ensembl annotation
+combined_data_gene <- left_join(feature_ensembl, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+rownames(combined_data_gene) <- combined_data_gene$feature_ID
+combined_data_gene <- combined_data_gene %>% select(-c("feature_ID"))
+
+# Now group by gene
+grouped <- aggregate(. ~ ensembl_gene, combined_data_gene, sum)
+rownames(grouped) <- grouped$ensembl_gene
+grouped <- grouped %>% select(-c("ensembl_gene"))
+```
+```{r}
+# Create a 
+```
+
+Run DESeq on the grouped data
+```{r de}
+# Run DESeq2 on filtered raw counts and phenodata
+dds <- DESeqDataSetFromMatrix(countData = grouped, 
+                              colData = kidney_PHENO2,
+                              design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+sex+sex*group+group)
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+summary(res)
+
+# Look at contrasts between groups
+
+# Control vs. 1 wk: results and top 10 by adjusted p-value
+
+control_1w <-results(dds, contrast=c("group","control","1w"), tidy = TRUE) 
+summary(control_1w)
+head(control_1w[order(control_1w$padj),], 10)
+
+
+# Control vs. 2 week
+control_2w <- results(dds, contrast=c("group", "control", "2w"), tidy = TRUE)
+summary(control_2w)
+head(control_2w[order(control_2w$padj),], 10)
+
+# Control vs. 4 week
+control_4w <- results(dds, contrast=c("group", "control", "4w"), tidy = TRUE)
+summary(control_4w)
+head(control_4w[order(control_4w$padj),], 10)
+
+# Control vs. 8 week
+control_8w <- results(dds, contrast=c("group", "control", "8w"),tidy = TRUE)
+summary(control_8w)
+head(control_8w[order(control_8w$padj),], 10)
+
+#Volcano for Control vs. 8 week
+control_8w <- control_8w[order(res$padj),]
+rownames(control_8w) <- control_8w$row
+head(control_8w)
+
+EnhancedVolcano(control_8w,
+    lab = rownames(control_8w),
+    x = 'log2FoldChange',
+    y = 'padj')
+
+```
+
+
+```{r}
+
+# Convert to factor
+kidney_PHENO2$Sample_batch<-as.factor(kidney_PHENO2$Sample_batch)
+
+# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
+full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
+design
+
+# Limma model
+v = voom(grouped, design, normalize.method="quantile")
+limma_model1 = lmFit(v, design)
+
+# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"  "sexmale:group2w"  "sexmale:group4w" "sexmale:group8w" "sexmale:groupcontrol"
+limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
+
+eb_Ftest1 = eBayes(limma_fit1)
+res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
+
+# Highest log fold changes:
+top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
+head(top.table)
+length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
+
+```
+
+Now we do GSEA! First, we convert the rat genes to human analogs so we can use human annotated gene sets
+
+Our code follows this vignette https://stephenturner.github.io/deseq-to-fgsea/
+```{r}
+library(biomaRt)
+mart <- useDataset("rnorvegicus_gene_ensembl", mart=useMart("ensembl"))
+bm <- getBM(attributes=c("ensembl_gene_id", "hsapiens_homolog_associated_gene_name"), mart=mart) %>%
+  distinct() %>%
+  as_tibble()
+bm
+
+```
+
+Then join the DESeq result with the gene symbols
+```{r}
+control_8w
+res <- inner_join(control_8w, bm, by=c("row"="ensembl_gene_id"))
+res2 <- res %>% 
+  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
+  distinct() %>% 
+  group_by(hsapiens_homolog_associated_gene_name) %>% 
+  summarize(stat=mean(stat)) %>% 
+  filter(hsapiens_homolog_associated_gene_name != "")
+```
+Then use fgsea. First we checked out the hallmark 50 genesets
+```{r}
+library(fgsea)
+ranks <- deframe(res2)
+pathways.hallmark <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
+
+fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
+head(fgsea_results, 10)
+```
+
+```{r}
+fgsea_results_sorted <- fgsea_results %>% arrange(NES)
+ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
+  scale_y_discrete(limits=fgsea_results_sorted$pathway) +
+  geom_col(aes(fill=padj<0.05)) +
+  theme(text = element_text(size = 6)) 
+```
+
+And we also looked at gene ontology annotated genesets
+```{r}
+library(fgsea)
+ranks <- deframe(res2)
+pathways.hallmark2 <- gmtPathways("c5.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes2 <- fgsea(pathways=pathways.hallmark2, stats=ranks)
+
+fgsea_results2 <- as.data.frame(fgseaRes2) %>% arrange(padj)
+head(fgsea_results2, 10)
+```
+
+All the above was for 8w, now check out the other time points too
+```{r}
+# Control vs 1 week
+res <- inner_join(control_1w, bm, by=c("row"="ensembl_gene_id"))
+res2 <- res %>% 
+  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
+  distinct() %>% 
+  group_by(hsapiens_homolog_associated_gene_name) %>% 
+  summarize(stat=mean(stat)) %>% 
+  filter(hsapiens_homolog_associated_gene_name != "")
+
+ranks <- deframe(res2)
+pathways.hallmark <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
+fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
+head(fgsea_results, 10)
+
+
+fgsea_results_sorted <- fgsea_results %>% arrange(NES)
+ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
+  scale_y_discrete(limits=fgsea_results_sorted$pathway) +
+  geom_col(aes(fill=padj<0.05)) +
+  theme(text = element_text(size = 6)) 
+```
+
+```{r}
+# Control vs 2 week
+res <- inner_join(control_2w, bm, by=c("row"="ensembl_gene_id"))
+res2 <- res %>% 
+  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
+  distinct() %>% 
+  group_by(hsapiens_homolog_associated_gene_name) %>% 
+  summarize(stat=mean(stat)) %>% 
+  filter(hsapiens_homolog_associated_gene_name != "")
+
+ranks <- deframe(res2)
+pathways.hallmark <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
+fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
+head(fgsea_results, 10)
+
+
+fgsea_results_sorted <- fgsea_results %>% arrange(NES)
+ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
+  scale_y_discrete(limits=fgsea_results_sorted$pathway) +
+  geom_col(aes(fill=padj<0.05)) +
+  theme(text = element_text(size = 6)) 
+```
+
+```{r}
+# Control vs 4 week
+res <- inner_join(control_4w, bm, by=c("row"="ensembl_gene_id"))
+res2 <- res %>% 
+  dplyr::select(hsapiens_homolog_associated_gene_name, stat) %>%
+  distinct() %>% 
+  group_by(hsapiens_homolog_associated_gene_name) %>% 
+  summarize(stat=mean(stat)) %>% 
+  filter(hsapiens_homolog_associated_gene_name != "")
+
+ranks <- deframe(res2)
+pathways.hallmark <- gmtPathways("h.all.v2023.1.Hs.symbols.gmt.txt")
+fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
+fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
+head(fgsea_results, 10)
+
+
+fgsea_results_sorted <- fgsea_results %>% arrange(NES)
+ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
+  scale_y_discrete(limits=fgsea_results_sorted$pathway) +
+  geom_col(aes(fill=padj<0.05)) +
+  theme(text = element_text(size = 6)) 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
