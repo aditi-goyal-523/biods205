@@ -59,12 +59,12 @@ Compare DESeq2, limma, and wilcoxon rank sum output.
 Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 ```{r kidneydata}
 
-#setwd("/Users/aubreyroberts/Documents/biods205_proj/")
+setwd("/Users/aubreyroberts/Documents/GitHub/biods205_proj/")
 
 kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
 kidney_raw<-load(file="ATAC_KIDNEY_RAW_COUNTS.rda")
 annotation<-load(file="ATAC_FEATURE_ANNOT.rda")
-#dea_results<-load(file="ATAC_KIDNEY_DA.rda")
+dea_results<-load(file="ATAC_KIDNEY_DA.rda")
 
 # We now have loaded in two new frames of counts:
 
@@ -73,6 +73,27 @@ head(ATAC_KIDNEY_NORM_DATA)
 
 # Raw - ATAC_KIDNEY_RAW_COUNTS
 head(ATAC_KIDNEY_RAW_COUNTS)
+
+ATAC_FEATURE_ANNOT %>% 
+  filter(feature_ID %in% rownames(filtered_raw_counts))
+
+# Peaks they said did DA for
+ATAC_KIDNEY_DA
+
+# Peaks they said were DA that are promoters
+test<-ATAC_KIDNEY_DA %>% 
+  filter(feature_ID %in% rownames(filtered_raw_counts))
+
+length(unique(test$feature_ID))
+
+#  Peaks they said were DE that are promoters that are adjusted < 0.05
+test$qvalue <- 
+  p.adjust(test$p_value, method="BH")
+
+test %>% 
+  filter(qvalue <= 0.05)
+
+length(unique(test$feature_ID))
 ```
 
 # PCA plot for kidney 
@@ -263,7 +284,7 @@ EnhancedVolcano(control_8w,
 ```
 
 # DESeq2 for female and male separately
-*Note: 1 significant upregulated peak in female at 4 weeks: chrY:554247-554590; none for males.*
+*Note: 1 significant upregulated peak in female at 2 weeks: chrY:554247-554590; none for males.*
 ```{r separate}
 
 # Female - DESeq2
@@ -296,7 +317,9 @@ control_8w <- results(dds, contrast=c("group", "control", "8w"))
 summary(control_8w)
 head(control_8w[order(control_8w$padj),], 10)
 
+```
 
+```{r male}
 # Male - DESeq2
 dds <- DESeqDataSetFromMatrix(countData = male_filtered_raw_counts, 
                               colData = male,
