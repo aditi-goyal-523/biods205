@@ -19,7 +19,6 @@ library(data.table)
 # Access MoTrPAC data from this package
 library(MotrpacRatTraining6moData)
 library(MotrpacRatTraining6mo)
-
 ```
 
 # Background:
@@ -59,11 +58,11 @@ Compare DESeq2, limma, and wilcoxon rank sum output.
 Download and load in epigenetic data from MoTrPAC package website: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 ```{r kidneydata}
 
-#setwd("/Users/aubreyroberts/Documents/biods205_proj/")
+setwd("/Users/aubreyroberts/Documents/GitHub/biods205/")
 
-kidney<-load(file="ATAC_KIDNEY_NORM_DATA.rda")
-kidney_raw<-load(file="ATAC_KIDNEY_RAW_COUNTS.rda")
-annotation<-load(file="ATAC_FEATURE_ANNOT.rda")
+kidney<-load(file="data/ATAC_KIDNEY_NORM_DATA.rda")
+kidney_raw<-load(file="data/ATAC_KIDNEY_RAW_COUNTS.rda")
+annotation<-load(file="data/ATAC_FEATURE_ANNOT.rda")
 #dea_results<-load(file="ATAC_KIDNEY_DA.rda")
 
 # We now have loaded in two new frames of counts:
@@ -73,6 +72,7 @@ head(ATAC_KIDNEY_NORM_DATA)
 
 # Raw - ATAC_KIDNEY_RAW_COUNTS
 head(ATAC_KIDNEY_RAW_COUNTS)
+
 ```
 
 # PCA plot for kidney 
@@ -114,13 +114,13 @@ Use UCSC genome browser file and bedtools. Filter dataset for promoter peaks.
 # Then feed these peaks of interest into DESeq2.
 
 # Load annotated peak data
-annotation_concise <- ATAC_FEATURE_ANNOT %>% select("feature_ID","chrom","start","end")
+annotation_concise <- ATAC_FEATURE_ANNOT[,c("feature_ID","chrom","start","end")]
 
 dim(ATAC_FEATURE_ANNOT)
 dim(ATAC_KIDNEY_RAW_COUNTS)
 
 # Join our data frame of our peaks with annotated data
-combined_data <- left_join(annotation_concise, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+combined_data <- left_join(annotation_concise, ATAC_KIDNEY_RAW_COUNTS) %>% dplyr::select(-c("feature","assay","tissue"))
 combined_data <- combined_data %>% mutate(chrom=paste("chr",chrom,sep = ""))
 
 vec<-unique(annotation_concise$feature_ID)
@@ -167,7 +167,7 @@ filtered_peaks_dist <- filtered_peaks %>% distinct()
 # Set features to rownames to format filtered raw counts for DESeq2
 rownames(filtered_peaks_dist) <- filtered_peaks_dist$feature_ID
 filtered_raw_counts <- filtered_peaks_dist[,-c(1:4)]
-dim(filtered_raw_counts)
+head(filtered_raw_counts)
 
 ```
 
@@ -184,8 +184,7 @@ kidney_PHENO<-PHENO %>%
 # Make sure order of samples is the same
 kidney_PHENO<-arrange(kidney_PHENO, viallabel)
 
-rownames(kidney_PHENO) == colnames(filtered_raw_counts)
-
+#rownames(kidney_PHENO) == colnames(filtered_raw_counts)
 
 # Add metadata covariates (includes Sample_batch, ...frip) to kidney_PHENO
 
@@ -198,116 +197,28 @@ kidney_META<-ATAC_META[rownames(ATAC_META) %in% sampleIDs,]
 any(rownames(kidney_META) != rownames(kidney_PHENO))
 
 kidney_PHENO2<-cbind(kidney_META, kidney_PHENO)
+saverows<-rownames(kidney_PHENO2)
 
-# Subset female and male IDs
+# Important: convert kidney to a factor and reorder levels
+kidney_PHENO2$group <- factor(kidney_PHENO2$group, levels = c("control", "1w", "2w", "4w", "8w"))
+unique(kidney_PHENO2$group)
+kidney_PHENO2$sex<-as.factor(kidney_PHENO2$sex)
+kidney_PHENO2$Sample_batch<-as.factor(kidney_PHENO2$Sample_batch)
 
-female<-kidney_PHENO2 %>% 
-  filter(sex == "female")
-femaleIDs<-rownames(female)
-
-male<-kidney_PHENO2 %>% 
-  filter(sex == "male")
-maleIDs<-rownames(male)
-
-# Subset filtered_raw_counts to female and male
-female_filtered_raw_counts<-filtered_raw_counts[colnames(filtered_raw_counts) %in% femaleIDs]
-male_filtered_raw_counts<-filtered_raw_counts[colnames(filtered_raw_counts) %in% maleIDs]
 ```
-# DESeq2 for differential expression of promoter peaks (Both Sexes)
+
+# DESeq2
+For differential expression of promoter peaks (Interaction term for sex*group)
 Note: No significant results.
 ```{r de}
+
 # Run DESeq2 on filtered raw counts and phenodata
 dds <- DESeqDataSetFromMatrix(countData = filtered_raw_counts, 
                               colData = kidney_PHENO2,
                               design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+sex+sex*group+group)
 
 dds <- DESeq(dds)
-
 res <- results(dds)
-
-summary(res)
-
-# Look at contrasts between groups
-
-# Control vs. 1 wk: results and top 10 by adjusted p-value
-
-control_1w <-results(dds, contrast=c("group","control","1w")) 
-summary(control_1w)
-head(control_1w[order(control_1w$padj),], 10)
-
-
-# Control vs. 2 week
-control_2w <- results(dds, contrast=c("group", "control", "2w"))
-summary(control_2w)
-head(control_2w[order(control_2w$padj),], 10)
-
-# Control vs. 4 week
-control_4w <- results(dds, contrast=c("group", "control", "4w"))
-summary(control_4w)
-head(control_4w[order(control_4w$padj),], 10)
-
-# Control vs. 8 week
-control_8w <- results(dds, contrast=c("group", "control", "8w"))
-summary(control_8w)
-head(control_8w[order(control_8w$padj),], 10)
-
-#Volcano for Control vs. 8 week
-control_8w <- control_8w[order(res$padj),]
-rownames(control_8w) <- control_8w$row
-head(control_8w)
-
-EnhancedVolcano(control_8w,
-    lab = rownames(control_8w),
-    x = 'log2FoldChange',
-    y = 'padj')
-
-```
-
-# DESeq2 for female and male separately
-*Note: 1 significant upregulated peak in female at 4 weeks: chrY:554247-554590; none for males.*
-```{r separate}
-
-# Female - DESeq2
-dds <- DESeqDataSetFromMatrix(countData = female_filtered_raw_counts, 
-                              colData = female,
-                              design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+group)
-
-dds <- DESeq(dds)
-res <- results(dds)
-summary(res)
-
-# Control vs. 1 wk: results and top 10 by adjusted p-value
-
-control_1w <-results(dds, contrast=c("group","control","1w")) 
-summary(control_1w)
-head(control_1w[order(control_1w$padj),], 10)
-
-# Control vs. 2 week
-control_2w <- results(dds, contrast=c("group", "control", "2w"))
-summary(control_2w)
-head(control_2w[order(control_2w$padj),], 10)
-
-# Control vs. 4 week
-control_4w <- results(dds, contrast=c("group", "control", "4w"))
-summary(control_4w)
-head(control_4w[order(control_4w$padj),], 10)
-
-# Control vs. 8 week
-control_8w <- results(dds, contrast=c("group", "control", "8w"))
-summary(control_8w)
-head(control_8w[order(control_8w$padj),], 10)
-```
-
-```{r}
-
-# Male - DESeq2
-dds <- DESeqDataSetFromMatrix(countData = male_filtered_raw_counts, 
-                              colData = male,
-                              design = ~Sample_batch+peak_enrich.frac_reads_in_peaks.macs2.frip+group)
-
-dds <- DESeq(dds)
-res <- results(dds)
-summary(res)
 
 # Control vs. 1 wk: results and top 10 by adjusted p-value
 
@@ -330,10 +241,39 @@ control_8w <- results(dds, contrast=c("group", "control", "8w"))
 summary(control_8w)
 head(control_8w[order(control_8w$padj),], 10)
 
+
+# VISUALIZATION OF P-VALUES:
+# Make control_8w contrast results into dataframe
+control_8w<-data.frame(control_8w)
+control_8w$pbins<-NULL
+control_8w$pbins[control_8w$padj > 0 & control_8w$padj < 0.05] <- "<0.05"
+control_8w$pbins[control_8w$padj >=0.05 & control_8w$padj < 0.3] <- "0.05-0.3"
+control_8w$pbins[control_8w$padj >=0.30 & control_8w$padj < 0.6] <- "0.3-0.6"
+control_8w$pbins[control_8w$padj >=0.60 & control_8w$padj < 0.9] <- "0.6-.9"
+control_8w$pbins[control_8w$padj >=0.90 & control_8w$padj < 1] <- "0.9-1.0"
+
+control_8w<-control_8w %>% 
+  filter(is.na(padj) == FALSE)
+
+ggplot(data = control_8w, 
+       aes(x = pbins)) + 
+  geom_histogram(stat = "count", color="light gray", fill="light gray") +
+  stat_count(binwidth = 1, 
+             geom = 'text', 
+             color = 'black', 
+             aes(label = ..count..),
+           position = position_stack(vjust = 0.5))+
+  scale_fill_discrete(drop=FALSE) +
+          scale_x_discrete(drop=FALSE)+
+  ggtitle("DESeq2: Adjusted p-value distribution (Control vs. 8 wk)")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Adjusted p-value bins", y="Number peaks")
+
+#control_8w %>% 
+  #filter(padj < 0.9)
 ```
 
 # We didn't find much with DESeq2.
-
 # Moving forward...things to try:
 
 1a) INTERSECT the FDR normalized peaks with the promoter region to see if those 237 regions are in promoter --- DONE.
@@ -361,15 +301,19 @@ We found that there is not overlap which is good.
 # Limma - try to reproduce MoTrPAC findings.
 Try to replicate original MoTrPAC findings with limma:
 1) use normalize.method="quantile" in voom
-2) use model with covariates (sex, sample_batch, and peak_enrich.frac_reads_in_peaks.macs2.frip, and/or sex*group interaction)
-No significant findings for male and female together for promoter peaks.
-```{r limmarepro}
+2) make sex_group contrasts
+3) use model with covariates (sample_batch and peak_enrich.frac_reads_in_peaks.macs2.frip)
 
-# Convert to factor
-kidney_PHENO2$Sample_batch<-as.factor(kidney_PHENO2$Sample_batch)
+```{r limma revamp}
 
-# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
-full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+# helpful: https://seqqc.wordpress.com/2020/11/28/10-tips-tricks-for-complex-model-matrix-designs-in-dge-analysis/
+
+# Create design matrix; use 0 as intercept because interested in pairwise contrasts
+kidney_PHENO2<-data.table(kidney_PHENO2)
+kidney_PHENO2[,sex_group :=paste0(sex, "_", group)]
+kidney_PHENO2[,sex_group :=factor(sex_group)]
+
+full_model_str = "~ 0 + sex_group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
 design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
 design
 
@@ -377,78 +321,58 @@ design
 v = voom(filtered_raw_counts, design, normalize.method="quantile")
 limma_model1 = lmFit(v, design)
 
-# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"  "sexmale:group2w"  "sexmale:group4w" "sexmale:group8w" "sexmale:groupcontrol"
-limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
-
-eb_Ftest1 = eBayes(limma_fit1)
-res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
-
-# Highest log fold changes:
-top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
-head(top.table)
-length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
-
-```
-
-# Limma for female alone
-```{r limma_sex}
-
-# Convert to factor
-female$Sample_batch<-as.factor(female$Sample_batch)
-
-# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
-full_model_str = "~ 1 +  group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
-design = model.matrix(as.formula(full_model_str), data=female)
-design
-
-# Limma model
-v = voom(female_filtered_raw_counts, design, normalize.method="quantile")
-limma_model1 = lmFit(v, design)
-
-# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"
-
-limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
-
-eb_Ftest1 = eBayes(limma_fit1)
-res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
-
-# Highest log fold changes:
-top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
-head(top.table)
-length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
-
-```
+cont.matrix=makeContrasts(
+  control_1wk_M = sex_groupmale_1w - sex_groupmale_control,
+  control_2wk_M = sex_groupmale_2w - sex_groupmale_control,
+  control_4wk_M = sex_groupmale_4w - sex_groupmale_control,
+  control_8wk_M = sex_groupmale_8w - sex_groupmale_control,
+  control_1wk_F = sex_groupfemale_1w - sex_groupfemale_control,
+  control_2wk_F = sex_groupfemale_2w - sex_groupfemale_control,
+  control_4wk_F = sex_groupfemale_4w - sex_groupfemale_control,
+  control_8wk_F = sex_groupfemale_8w - sex_groupfemale_control,
+  levels=design)
+  
+fit2=contrasts.fit(limma_model1,cont.matrix)
+limma_res=eBayes(fit2)
+topTable(limma_res, coef = "control_1wk_M")
+topTable(limma_res, coef = "control_2wk_M")
+topTable(limma_res, coef = "control_4wk_M")
+male8wk<-topTable(limma_res, coef = "control_8wk_M", n=Inf)
+topTable(limma_res, coef = "control_1wk_F")
+topTable(limma_res, coef = "control_2wk_F")
+topTable(limma_res, coef = "control_4wk_F")
+female8wk<-topTable(limma_res, coef = "control_8wk_F", n=Inf)
 
 
-# Limma for male alone
-```{r limma_sex}
+# VISUALIZATION OF P-VALUES:
+# Make control_8w contrast results into dataframe
+female8wk
+female8wk$pbins<-NULL
+female8wk$pbins[female8wk$adj.P.Val > 0 & female8wk$adj.P.Val < 0.05] <- "<0.05"
+female8wk$pbins[female8wk$adj.P.Val >=0.05 & female8wk$adj.P.Val < 0.3] <- "0.05-0.3"
+female8wk$pbins[female8wk$adj.P.Val >=0.30 & female8wk$adj.P.Val < 0.6] <- "0.3-0.6"
+female8wk$pbins[female8wk$adj.P.Val >=0.60 & female8wk$adj.P.Val < 0.9] <- "0.6-.9"
+female8wk$pbins[female8wk$adj.P.Val >=0.90 & female8wk$adj.P.Val < 1] <- "0.9-1.0"
 
-# Convert to factor
-male$Sample_batch<-as.factor(male$Sample_batch)
+female8wk<-female8wk %>% 
+  filter(is.na(adj.P.Val) == FALSE)
 
-# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
-full_model_str = "~ 1 +  group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
-design = model.matrix(as.formula(full_model_str), data=male)
-design
+ggplot(data = female8wk, 
+       aes(x = pbins)) + 
+  geom_histogram(stat = "count", color="lightpink", fill="lightpink") +
+  stat_count(binwidth = 1, 
+             geom = 'text', 
+             color = 'black', 
+             aes(label = ..count..),
+           position = position_stack(vjust = 0.5))+
+  scale_fill_discrete(drop=FALSE) +
+          scale_x_discrete(drop=FALSE)+
+  ggtitle("Limma: Adjusted p-value distribution (female control vs. female 8 wk)")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Adjusted p-value bins", y="Number peaks")
 
-# Limma model
-v = voom(male_filtered_raw_counts, design, normalize.method="quantile")
-limma_model1 = lmFit(v, design)
-
-# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"
-
-limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
-
-eb_Ftest1 = eBayes(limma_fit1)
-res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
-
-# Highest log fold changes:
-top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
-head(top.table)
-length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
 
 ```
-
 
 # Normalization prior to Wilcoxon Rank Sum
 Normalize filtered_raw_counts to "filtered_norm_counts" for Wilcoxin rank sum (adapted from Bootcamp)
@@ -473,12 +397,11 @@ scalefactor <- samplesums/1000000
 filtered_norm_counts <- t(t(filtered_norm_counts) / scalefactor)  #transposition is important to divide across columns
 
 #check that all samples summed expression == 1M
-colSums(filtered_norm_counts)
+#colSums(filtered_norm_counts)
 
 # Log2 Normalization
 # use +1 because can't take logs of zero
 filtered_norm_counts <- log2(filtered_norm_counts + 1)
-head(filtered_norm_counts)
 
 ```
 
@@ -488,32 +411,47 @@ Differential Expression with two-sided Wilcoxon rank sums test followed by Benja
 ```{r wilcox}
 # Want to use normalized data for this.
 
+# Subset phenodata and get female and male IDs
+kidney_PHENO2<-as.data.frame(kidney_PHENO2)
+rownames(kidney_PHENO2)<-saverows
+female<-kidney_PHENO2 %>% 
+  filter(sex == "female")
+f_ids<-rownames(female)
+
+male<-kidney_PHENO2 %>% 
+  filter(sex == "male")
+m_ids<-rownames(male)
+
+# Subset counts to female and male
+M_filtered_norm_counts <- filtered_norm_counts[,colnames(filtered_raw_counts) %in% m_ids]
+F_filtered_norm_counts <- filtered_norm_counts[,colnames(filtered_raw_counts) %in% f_ids]
+
 # we want to compare pairs of phenotypes: control, 1wk, 2wk, 4wk, 8wk --- four pairwise contrasts (control v 1, control v 2, control v 4, control v 8)
 
+# MALE
 # create subsets of IDs 
-controlids <- rownames(kidney_PHENO[kidney_PHENO$group=="control",])
-week1_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="1w",])
-week2_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="2w",])
-week4_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="4w",])
-week8_ids <- rownames(kidney_PHENO[kidney_PHENO$group=="8w",])
+controlids <- rownames(male[male$group=="control",])
+week1_ids <- rownames(male[male$group=="1w",])
+week2_ids <- rownames(male[male$group=="2w",])
+week4_ids <- rownames(male[male$group=="4w",])
+week8_ids <- rownames(male[male$group=="8w",])
 
-# Note: filtered_norm_counts stores normalized count data for promoter regions only; could also try this with ATAC_KIDNEY_NORM_DATA (normalized data for all peaks, even outside promoter)
-
-# Run Wilcoxon rank sum test (control vs. 4 wk):
+# Note: filtered_norm_counts stores normalized count data for promoter regions only; could also try this with ATAC_KIDNEY_NORM_DATA (normalized data for all peaks, even omoter)
+# Run Wilcoxon rank sum test (control vs. 8 wk):
 
 todf <- list()
 # for loop through all genes
-allgenes <- rownames(filtered_norm_counts)
+allgenes <- rownames(M_filtered_norm_counts)
 for (i in seq(length(allgenes))){
   
   # calculate log2fc between control and 4 wk
   gene <- allgenes[i]
-  control <- as.numeric(filtered_norm_counts[i,controlids])
-  wk4 <- as.numeric(filtered_norm_counts[i,week4_ids])
-  log2fc <- mean(control) - mean(wk4)   #log(control/wk4) = log(control)-log(4wk)
+  control <- as.numeric(M_filtered_norm_counts[i,controlids])
+  wk8 <- as.numeric(M_filtered_norm_counts[i,week8_ids])
+  log2fc <- mean(control) - mean(wk8)   #log(control/wk8) = log(control)-log(4wk)
   
   # wilcoxon rank sums - outputs tstatistic and pvalue; extract pvalue
-  res <- wilcox.test(control, wk4, alternative = "two.sided", exact=FALSE)
+  res <- wilcox.test(control, wk8, alternative = "two.sided", exact=FALSE)
   pvalue <- res$p.value
   
   # store results
@@ -526,78 +464,112 @@ colnames(dfstats) <- c("gene", "log2fc", "pvalue")
 dfstats$log2fc <- as.numeric(dfstats$log2fc)
 dfstats$pvalue <- as.numeric(dfstats$pvalue)
 dfstats <- dfstats[order(dfstats$pvalue),]
-head(dfstats)
 
 # multiple hypothesis correction using benjamini-hochberg procedure
 dfstats$qvalue <- p.adjust(dfstats$pvalue, method="BH")
+head(dfstats)
 dfstats[(dfstats$qvalue<0.05),]
 any(dfstats$qvalue < 0.05) # NO SIGNIFICANT P-VALUES AFTER ADJUSTMENT 
 
-# volcano plot with p value
-EnhancedVolcano(dfstats,
-    lab = dfstats$gene,
-    x = 'log2fc',
-    y = 'qvalue',
-    title = 'Differential Expression Control/4wk')
-```
 
-# GSEA - See Sophie's code instead. Just notes below.
-Fast preranked gene set enrichment analysis (GSEA) with LFC of genes
-```{r gsea}
+# VISUALIZATION OF P-VALUES:
+# Make control_8w contrast results into dataframe
+dfstats$pbins<-NULL
+dfstats$pbins[dfstats$qvalue > 0 & dfstats$qvalue < 0.05] <- "<0.05"
+dfstats$pbins[dfstats$qvalue >=0.05 & dfstats$qvalue < 0.3] <- "0.05-0.3"
+dfstats$pbins[dfstats$qvalue >=0.30 & dfstats$qvalue < 0.6] <- "0.3-0.6"
+dfstats$pbins[dfstats$qvalue >=0.60 & dfstats$qvalue < 0.9] <- "0.6-.9"
+dfstats$pbins[dfstats$qvalue >=0.90 & dfstats$qvalue <= 1] <- "0.9-1.0"
 
-# Good resource: https://bioinformatics-core-shared-training.github.io/RNAseq_September_2019/html/06_Gene_set_testing.html#fgsea
+dfstats<-dfstats %>% 
+  filter(is.na(qvalue) == FALSE)
 
-# Step 1: Ranking Data. Provide fgsea a vector containing numeric data by which it should rank the genes. 
-# We can rank based on fold change.
-
-#rankData<-top.table$logFC
-#names(rankData) <- rownames(top.table)
-
-# Step 2: Load in pathways (external source?)
-
-# Step 3: Conduct analysis
-#fgseaRes <- fgsea(pathways,
-                 # rankData,
-                 # minSize = 15,
-                 # maxSize = 500,
-
-# use plotEnrichment() later to plot enrichment scores
-# use plotGseaTable() to plot a summary figure showing pathways
-
-```
-
-# Limma on all peaks, not just promoter
-```{r}
-
-# Use all normalized data (not filtered for promoter peaks): NORM_DATA_full
-
-ATAC_KIDNEY_RAW_COUNTS<-ATAC_KIDNEY_RAW_COUNTS %>% 
-  select(-c(1,3:4))
-rownames(ATAC_KIDNEY_RAW_COUNTS)<-ATAC_KIDNEY_RAW_COUNTS$feature_ID
-ATAC_KIDNEY_RAW_COUNTS$feature_ID<-NULL
-
-# Use Phenotype data from kidney_PHENO2
-
-# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
-full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
-design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
-
-# Limma model
-v = voom(ATAC_KIDNEY_RAW_COUNTS, design, normalize.method="quantile")
-limma_model1 = lmFit(v, design)
-
-# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"  "sexmale:group2w"  "sexmale:group4w" "sexmale:group8w" "sexmale:groupcontrol"
-limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
-
-eb_Ftest1 = eBayes(limma_fit1)
-res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
-
-# Highest log fold changes:
-top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
-head(top.table)
-length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
+ggplot(data = dfstats, 
+       aes(x = pbins)) + 
+  geom_histogram(stat = "count", color="lightblue", fill="lightblue") +
+  stat_count(binwidth = 1, 
+             geom = 'text', 
+             color = 'black', 
+             aes(label = ..count..),
+           position = position_stack(vjust = 0.5))+
+  scale_fill_discrete(drop=FALSE) +
+          scale_x_discrete(drop=FALSE)+
+  ggtitle("Wilcoxon: Adjusted p-value distribution (Male control vs. Male 8 wk)")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Adjusted p-value bins", y="Number peaks")
 
 
+#############
+
+# FEMALE
+# create subsets of IDs 
+controlids <- rownames(female[female$group=="control",])
+week1_ids <- rownames(female[female$group=="1w",])
+week2_ids <- rownames(female[female$group=="2w",])
+week4_ids <- rownames(female[female$group=="4w",])
+week8_ids <- rownames(female[female$group=="8w",])
+
+# Note: filtered_norm_counts stores normalized count data for promoter regions only; could also try this with ATAC_KIDNEY_NORM_DATA (normalized data for all peaks, even omoter)
+# Run Wilcoxon rank sum test (control vs. 8 wk):
+
+todf <- list()
+# for loop through all genes
+allgenes <- rownames(F_filtered_norm_counts)
+for (i in seq(length(allgenes))){
+  
+  # calculate log2fc between control and 4 wk
+  gene <- allgenes[i]
+  control <- as.numeric(F_filtered_norm_counts[i,controlids])
+  wk8 <- as.numeric(F_filtered_norm_counts[i,week8_ids])
+  log2fc <- mean(control) - mean(wk8)   #log(control/wk8) = log(control)-log(4wk)
+  
+  # wilcoxon rank sums - outputs tstatistic and pvalue; extract pvalue
+  res <- wilcox.test(control, wk8, alternative = "two.sided", exact=FALSE)
+  pvalue <- res$p.value
+  
+  # store results
+  todf[[i]] <- c(gene, log2fc, pvalue)
+}
+
+# reformat list of vectors into dataframe
+dfstats <- as.data.frame(do.call(rbind, todf))
+colnames(dfstats) <- c("gene", "log2fc", "pvalue")
+dfstats$log2fc <- as.numeric(dfstats$log2fc)
+dfstats$pvalue <- as.numeric(dfstats$pvalue)
+dfstats <- dfstats[order(dfstats$pvalue),]
+
+# multiple hypothesis correction using benjamini-hochberg procedure
+dfstats$qvalue <- p.adjust(dfstats$pvalue, method="BH")
+head(dfstats)
+dfstats[(dfstats$qvalue<0.05),]
+any(dfstats$qvalue < 0.05) # NO SIGNIFICANT P-VALUES AFTER ADJUSTMENT 
+
+
+# VISUALIZATION OF P-VALUES:
+# Make control_8w contrast results into dataframe
+dfstats$pbins<-NULL
+dfstats$pbins[dfstats$qvalue > 0 & dfstats$qvalue < 0.05] <- "<0.05"
+dfstats$pbins[dfstats$qvalue >=0.05 & dfstats$qvalue < 0.3] <- "0.05-0.3"
+dfstats$pbins[dfstats$qvalue >=0.30 & dfstats$qvalue < 0.6] <- "0.3-0.6"
+dfstats$pbins[dfstats$qvalue >=0.60 & dfstats$qvalue < 0.9] <- "0.6-.9"
+dfstats$pbins[dfstats$qvalue >=0.90 & dfstats$qvalue <= 1] <- "0.9-1.0"
+
+dfstats<-dfstats %>% 
+  filter(is.na(qvalue) == FALSE)
+
+ggplot(data = dfstats, 
+       aes(x = pbins)) + 
+  geom_histogram(stat = "count", color="lightpink", fill="lightpink") +
+  stat_count(binwidth = 1, 
+             geom = 'text', 
+             color = 'black', 
+             aes(label = ..count..),
+           position = position_stack(vjust = 0.5))+
+  scale_fill_discrete(drop=FALSE) +
+          scale_x_discrete(drop=FALSE)+
+  ggtitle("Wilcoxon: Adjusted p-value distribution (Female control vs. Female 8 wk)")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Adjusted p-value bins", y="Number peaks")
 
 
 ```
@@ -605,20 +577,20 @@ length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
 
 Now we try grouping peaks by their nearest gene
 ```{r}
-feature_ensembl <- ATAC_FEATURE_ANNOT %>% select("feature_ID","ensembl_gene")
+feature_ensembl <- ATAC_FEATURE_ANNOT %>% dplyr::select("feature_ID","ensembl_gene")
 
 # Join the peaks with the ensembl annotation
-combined_data_gene <- left_join(feature_ensembl, ATAC_KIDNEY_RAW_COUNTS) %>% select(-c("feature","assay","tissue"))
+combined_data_gene <- left_join(feature_ensembl, ATAC_KIDNEY_RAW_COUNTS) %>% dplyr:: select(-c("feature","assay","tissue"))
 rownames(combined_data_gene) <- combined_data_gene$feature_ID
-combined_data_gene <- combined_data_gene %>% select(-c("feature_ID"))
-
+combined_data_gene <- combined_data_gene %>% dplyr::select(-c("feature_ID"))
+dim(combined_data_gene)
 # Now group by gene
 grouped <- aggregate(. ~ ensembl_gene, combined_data_gene, sum)
 rownames(grouped) <- grouped$ensembl_gene
-grouped <- grouped %>% select(-c("ensembl_gene"))
-```
-```{r}
-# Create a 
+grouped <- grouped %>% dplyr::select(-c("ensembl_gene"))
+
+head(grouped)
+
 ```
 
 Run DESeq on the grouped data
@@ -668,9 +640,39 @@ EnhancedVolcano(control_8w,
     x = 'log2FoldChange',
     y = 'padj')
 
+# VISUALIZATION OF P-VALUES:
+# Make control_8w contrast results into dataframe
+control_8w<-data.frame(control_8w)
+control_8w$pbins<-NULL
+control_8w$pbins[control_8w$padj > 0 & control_8w$padj < 0.05] <- "<0.05"
+control_8w$pbins[control_8w$padj >=0.05 & control_8w$padj < 0.3] <- "0.05-0.3"
+control_8w$pbins[control_8w$padj >=0.30 & control_8w$padj < 0.6] <- "0.3-0.6"
+control_8w$pbins[control_8w$padj >=0.60 & control_8w$padj < 0.9] <- "0.6-.9"
+control_8w$pbins[control_8w$padj >=0.90 & control_8w$padj < 1] <- "0.9-1.0"
+
+control_8w<-control_8w %>% 
+  filter(is.na(padj) == FALSE)
+
+ggplot(data = control_8w, 
+       aes(x = pbins)) + 
+  geom_histogram(stat = "count", color="light gray", fill="light gray") +
+  stat_count(binwidth = 1, 
+             geom = 'text', 
+             color = 'black', 
+             aes(label = ..count..),
+           position = position_stack(vjust = 0.5))+
+  scale_fill_discrete(drop=FALSE) +
+          scale_x_discrete(drop=FALSE)+
+  ggtitle("DESeq2: Adjusted p-value distribution (Control vs. 8 wk)")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Adjusted p-value bins", y="Number peaks")
+
+
+
+
 ```
 
-
+Try grouped data in limma.
 ```{r}
 
 # Convert to factor
@@ -721,7 +723,9 @@ res2 <- res %>%
   group_by(hsapiens_homolog_associated_gene_name) %>% 
   summarize(stat=mean(stat)) %>% 
   filter(hsapiens_homolog_associated_gene_name != "")
+
 ```
+
 Then use fgsea. First we checked out the hallmark 50 genesets
 ```{r}
 library(fgsea)
@@ -752,7 +756,7 @@ fgsea_results2 <- as.data.frame(fgseaRes2) %>% arrange(padj)
 head(fgsea_results2, 10)
 ```
 
-All the above was for 8w, now check out the other time points too
+All the above was for 8w, now check out the other time points too.
 ```{r}
 # Control vs 1 week
 res <- inner_join(control_1w, bm, by=c("row"="ensembl_gene_id"))
