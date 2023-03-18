@@ -261,7 +261,7 @@ ggplot(data = control_8w,
   stat_count(binwidth = 1, 
              geom = 'text', 
              color = 'black', 
-             aes(label = ..count..),
+             aes(label = after_stat(count)),
            position = position_stack(vjust = 0.5))+
   scale_fill_discrete(drop=FALSE) +
           scale_x_discrete(drop=FALSE)+
@@ -610,23 +610,23 @@ summary(res)
 
 # Control vs. 1 wk: results and top 10 by adjusted p-value
 
-control_1w <-results(dds, contrast=c("group","control","1w"), tidy = TRUE) 
+control_1w <-results(dds, contrast=c("group","1w","control"), tidy = TRUE) 
 summary(control_1w)
 head(control_1w[order(control_1w$padj),], 10)
 
 
 # Control vs. 2 week
-control_2w <- results(dds, contrast=c("group", "control", "2w"), tidy = TRUE)
+control_2w <- results(dds, contrast=c("group", "2w", "control"), tidy = TRUE)
 summary(control_2w)
 head(control_2w[order(control_2w$padj),], 10)
 
 # Control vs. 4 week
-control_4w <- results(dds, contrast=c("group", "control", "4w"), tidy = TRUE)
+control_4w <- results(dds, contrast=c("group", "4w", "control"), tidy = TRUE)
 summary(control_4w)
 head(control_4w[order(control_4w$padj),], 10)
 
 # Control vs. 8 week
-control_8w <- results(dds, contrast=c("group", "control", "8w"),tidy = TRUE)
+control_8w <- results(dds, contrast=c("group", "8w", "control"),tidy = TRUE)
 summary(control_8w)
 head(control_8w[order(control_8w$padj),], 10)
 
@@ -674,12 +674,9 @@ ggplot(data = control_8w,
 
 Try grouped data in limma.
 ```{r}
+# Create design matrix; use 0 as intercept because interested in pairwise contrasts
 
-# Convert to factor
-kidney_PHENO2$Sample_batch<-as.factor(kidney_PHENO2$Sample_batch)
-
-# Create design matrix with model.matrix() -- specifies which variables/coefficients will be in linear model
-full_model_str = "~ 1 + sex+ group + sex*group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
+full_model_str = "~ 0 + sex_group + Sample_batch + peak_enrich.frac_reads_in_peaks.macs2.frip"
 design = model.matrix(as.formula(full_model_str), data=kidney_PHENO2)
 design
 
@@ -687,16 +684,55 @@ design
 v = voom(grouped, design, normalize.method="quantile")
 limma_model1 = lmFit(v, design)
 
-# contrasts from limma_fit1: "group2w"   "group4w"    "group8w"  "groupcontrol"  "sexmale:group2w"  "sexmale:group4w" "sexmale:group8w" "sexmale:groupcontrol"
-limma_fit1 = contrasts.fit(limma_model1, coefficients=colnames(design)[grepl('group',colnames(design))]) 
+cont.matrix=makeContrasts(
+  control_1wk_M = sex_groupmale_1w - sex_groupmale_control,
+  control_2wk_M = sex_groupmale_2w - sex_groupmale_control,
+  control_4wk_M = sex_groupmale_4w - sex_groupmale_control,
+  control_8wk_M = sex_groupmale_8w - sex_groupmale_control,
+  control_1wk_F = sex_groupfemale_1w - sex_groupfemale_control,
+  control_2wk_F = sex_groupfemale_2w - sex_groupfemale_control,
+  control_4wk_F = sex_groupfemale_4w - sex_groupfemale_control,
+  control_8wk_F = sex_groupfemale_8w - sex_groupfemale_control,
+  levels=design)
+  
+fit2=contrasts.fit(limma_model1,cont.matrix)
+limma_res=eBayes(fit2)
+topTable(limma_res, coef = "control_1wk_M")
+topTable(limma_res, coef = "control_2wk_M")
+topTable(limma_res, coef = "control_4wk_M")
+male8wk<-topTable(limma_res, coef = "control_8wk_M", n=Inf)
+topTable(limma_res, coef = "control_1wk_F")
+topTable(limma_res, coef = "control_2wk_F")
+topTable(limma_res, coef = "control_4wk_F")
+female8wk<-topTable(limma_res, coef = "control_8wk_F", n=Inf)
 
-eb_Ftest1 = eBayes(limma_fit1)
-res = topTable(eb_Ftest1, n=nrow(eb_Ftest1))
+# Grouped peaks visualization - significant genes histogram
 
-# Highest log fold changes:
-top.table<-topTreat(eb_Ftest1, sort.by = "logFC", n=Inf)
-head(top.table)
-length(which(top.table$adj.P.Val < 0.05)) # number of DEGs
+female8wk
+female8wk$pbins<-NULL
+female8wk$pbins[female8wk$adj.P.Val > 0 & female8wk$adj.P.Val < 0.05] <- "<0.05"
+female8wk$pbins[female8wk$adj.P.Val >=0.05 & female8wk$adj.P.Val < 0.3] <- "0.05-0.3"
+female8wk$pbins[female8wk$adj.P.Val >=0.30 & female8wk$adj.P.Val < 0.6] <- "0.3-0.6"
+female8wk$pbins[female8wk$adj.P.Val >=0.60 & female8wk$adj.P.Val < 0.9] <- "0.6-.9"
+female8wk$pbins[female8wk$adj.P.Val >=0.90 & female8wk$adj.P.Val < 1] <- "0.9-1.0"
+
+female8wk<-female8wk %>% 
+  filter(is.na(adj.P.Val) == FALSE)
+
+ggplot(data = female8wk, 
+       aes(x = pbins)) + 
+  geom_histogram(stat = "count", color="lightpink", fill="lightpink") +
+  stat_count(binwidth = 1, 
+             geom = 'text', 
+             color = 'black', 
+             aes(label = ..count..),
+           position = position_stack(vjust = 0.5))+
+  scale_fill_discrete(drop=FALSE) +
+          scale_x_discrete(drop=FALSE)+
+  ggtitle("Limma: Adjusted p-value distribution (female control vs. female 8 wk)")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(x="Adjusted p-value bins", y="Number peaks")
+
 
 ```
 
