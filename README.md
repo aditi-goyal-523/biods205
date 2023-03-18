@@ -6,4 +6,4 @@ This repo contains the code for analyzing MoTrPAC epigenetic data for kidney in 
 
 Epigenetic data downloaded from: https://github.com/MoTrPAC/MotrpacRatTraining6moData#about-this-package
 
-Analyses for class report can be found in 'epigenetics.kidney.Rmd'.
+Analyses for class report can be found in 'epigenetics_kidney.Rmd'.
