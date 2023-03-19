@@ -1,0 +1,246 @@
+---
+title: "motif analysis"
+author: "Aditi Goyal"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message=FALSE)
+knitr::opts_chunk$set(warning =FALSE)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=70), tidy=TRUE)
+rm(list=ls())
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(MotrpacRatTraining6moData)
+library(MotrpacRatTraining6mo)
+library(ChIPseeker)
+ library(stringi)
+library(stringr)
+library(data.table)
+library(GenomicFeatures)
+```
+
+# Auxillary FUnction
+
+```{r}
+get_peak_annotations = function(counts, species="Rattus norvegicus", release=96, txdb=NULL){
+
+
+  if(!"feature_ID" %in% colnames(counts) & !data.table::is.data.table(counts)){
+    genomic_peaks = data.table::data.table(
+      feature_ID = rownames(counts),
+      chrom = gsub(":.*","",rownames(counts)),
+      start = as.numeric(gsub(".*:|-.*","",rownames(counts))),
+      end = as.numeric(gsub(".*-","",rownames(counts)))
+    )
+  }else if(!"feature_ID" %in% colnames(counts) & data.table::is.data.table(counts)){
+    counts = counts
+    counts[,feature_ID := paste0(chrom,':',start,'-',end)]
+    genomic_peaks = counts[,.(chrom, start, end, feature_ID)]
+  }else if("feature_ID" %in% colnames(counts) & data.table::is.data.table(counts)){
+    counts = counts
+    genomic_peaks = counts[,.(chrom, start, end, feature_ID)]
+  }
+  else{
+    stop("Incorrect input format. 'counts' should be a data frame or data table with columns 'chrom', 'start', 'end', and 'feature_ID'.")
+  }
+  
+  if(is.null(txdb)){
+
+    if (!requireNamespace("GenomicFeatures", quietly = TRUE) | !requireNamespace("RMariaDB", quietly = TRUE)){
+      stop(
+        "Packages 'GenomicFeatures' and 'RMariaDB' must be installed to generate a TxDb object with 'makeTxDbFromEnsembl()'.",
+        call. = FALSE
+      )
+    }
+
+    # make TxDb object 
+    #txdb = GenomicFeatures::makeTxDbFromEnsembl(organism=species,
+                                                #release=release)
+    
+    txdb = GenomicFeatures::makeTxDbFromUCSC(genome='rn7', tablename = "refGene")
+  }
+  
+  accepted_chrom = GenomeInfoDb::seqlevels(txdb)
+  # remove contigs
+  accepted_chrom = accepted_chrom[!grepl("\\.",accepted_chrom)]
+  
+  # remove contigs from input 
+  genomic_peaks = genomic_peaks[!grepl("\\.",chrom)]
+  
+  #genomic_peaks[,chrom := gsub("^chr","",as.character(chrom))]
+  if(!all(unique(genomic_peaks[,chrom]) %in% accepted_chrom)){
+    stop(sprintf("The following chromosomes are found in the input but not in the txdb object: %s", paste0(unique(!genomic_peaks[,chrom] %in% accepted_chrom), collapse=', ')))
+  }
+  
+  # annotate peaks 
+  peak = GenomicRanges::GRanges(seqnames = genomic_peaks[,chrom], 
+                                ranges = IRanges::IRanges(as.numeric(genomic_peaks[,start]), as.numeric(genomic_peaks[,end])))
+  peakAnno = ChIPseeker::annotatePeak(peak, 
+                                      level = "gene",
+                                      tssRegion=c(-1000,1000), 
+                                      TxDb=txdb,
+                                      overlap = "all")
+  pa = data.table::as.data.table(peakAnno@anno)
+  
+  # add back feature_ID
+  if(nrow(pa)==nrow(genomic_peaks)){
+    pa[,feature_ID := genomic_peaks[,feature_ID]]
+  }else{
+    cols=c('seqnames','start','end')
+    pa[,(cols) := lapply(.SD, as.character), .SDcols=cols]
+    cols=c('chrom','start','end')
+    genomic_peaks[,(cols) := lapply(.SD, as.character), .SDcols=cols]
+    pa = merge(pa, genomic_peaks, by.x=c('seqnames','start','end'), by.y=c('chrom','start','end'), all.y=T)
+  }
+  
+  # add simpler annotation
+  pa[,short_annotation := annotation]
+  pa[grepl('Exon', short_annotation), short_annotation := 'Exon']
+  pa[grepl('Intron', short_annotation), short_annotation := 'Intron']
+  
+  pa[,c('geneChr','strand') := NULL]
+  
+  # add a "relationship_to_gene" (from gene start or end, whichever is closer)
+  cols=c('start','end','geneStart','geneEnd','geneStrand')
+  pa[,(cols) := lapply(.SD, as.numeric), .SDcols=cols]
+  pa[,dist_upstream := ifelse(end-geneStart <=0, end-geneStart, NA_real_)]
+  pa[,dist_downstream := ifelse(start-geneEnd >= 0, start-geneEnd, NA_real_)]
+  # if feature overlaps with gene body, say dist_to_gene is 0
+  pa[end >= geneStart & start <= geneEnd, dist_downstream := 0]
+  pa[end >= geneStart & start <= geneEnd, dist_upstream := 0]
+  pa[, relationship_to_gene := ifelse(is.na(dist_downstream), dist_upstream, dist_downstream)]
+  pa[,c('dist_upstream','dist_downstream') := NULL]
+  
+  # fix "Downstream" and "Distal Intergenic" annotations
+  pa[relationship_to_gene == 0 & grepl("Downstream|Intergenic", short_annotation), short_annotation := "Overlaps Gene"]
+  # Downstream
+  pa[geneStrand == 1 & relationship_to_gene > 0 & relationship_to_gene < 5000, short_annotation := "Downstream (<5kb)"]
+  pa[geneStrand == 2 & relationship_to_gene < 0 & relationship_to_gene > -5000, short_annotation := "Downstream (<5kb)"]
+  # Upstream (promoter excluded)
+  pa[geneStrand == 1 & relationship_to_gene > -5000 & relationship_to_gene < 0 & 
+       grepl("Downstream|Intergenic", short_annotation), short_annotation := "Upstream (<5kb)"]
+  pa[geneStrand == 2 & relationship_to_gene < 5000 & relationship_to_gene > 0 & 
+       grepl("Downstream|Intergenic", short_annotation), short_annotation := "Upstream (<5kb)"]
+  pa[abs(relationship_to_gene) >= 5000, short_annotation := "Distal Intergenic"]
+
+  data.table::setnames(pa, 
+                       c('short_annotation','annotation','seqnames','geneId'), 
+                       c('custom_annotation','chipseeker_annotation','chrom','ensembl_gene'))
+  
+  return(peakAnno)
+  #return(as.data.frame(pa))
+}
+```
+
+
+# Load ATAC Data
+contains all, unfiltered results from timewise differential analysis using Limma Voom.
+```{r}
+#load('../ATAC_KIDNEY_DA.rda')
+```
+
+# Filter data to be significant DA results only
+```{r}
+# head(ATAC_KIDNEY_DA)
+# 
+# atac=ATAC_KIDNEY_DA[ATAC_KIDNEY_DA$p_value<=0.05, ]
+# 
+# atac$qvalue <- p.adjust(atac$p_value, method="BH")
+# 
+# atac_sig=atac%>%filter(qvalue <=0.05)
+```
+
+```{r}
+#write.csv(atac_sig, file='atac_sig.csv')
+```
+
+# Read in significant atac peaks
+```{r}
+atac_sig=read.csv('atac_sig.csv')
+
+atac_sig=atac_sig%>%dplyr::select(feature_ID, sex, comparison_group, p_value, logFC, logFC_se, tscore, qvalue)
+
+```
+
+#reformat
+```{r}
+# get chrom column
+ atac_sig['chrom']=str_extract(atac_sig$feature_ID, ".*:")
+ #atac_sig['chrom']=gsub("chr", "", atac_sig$chrom)
+ atac_sig['chrom']=gsub(":", "", atac_sig$chrom)
+
+# get start column
+ atac_sig['start']=str_extract(atac_sig$feature_ID, ".*:[:digit:]*-")
+ atac_sig['start']=gsub("chr\\d+:", "", atac_sig$start)
+ atac_sig['start']=gsub("-", "", atac_sig$start)
+ atac_sig$start=as.integer(atac_sig$start)
+
+ #get end column
+ atac_sig['end']=str_extract(atac_sig$feature_ID, "-[:digit:]*")
+ atac_sig['end']=gsub("-", "", atac_sig$end)
+ atac_sig$end=as.integer(atac_sig$end)
+
+ #reposition
+ atac_sig=atac_sig%>%relocate(chrom)%>%relocate(start, .after=chrom)%>%relocate(end, .after=start)
+
+ atac_sig=atac_sig %>% drop_na()
+
+ head(atac_sig)
+```
+
+#break into timepoints
+```{r}
+atac_1w=atac_sig%>%filter(comparison_group=='1w')
+
+atac_2w=atac_sig%>%filter(comparison_group=='2w')
+
+atac_4w=atac_sig%>%filter(comparison_group=='4w')
+
+atac_8w=atac_sig%>%filter(comparison_group=='8w')
+```
+
+
+```{r}
+peak_1w=get_peak_annotations(data.table(atac_1w))
+plotAnnoPie(peak_1w)
+
+peak_2w=get_peak_annotations(data.table(atac_2w))
+plotAnnoPie(peak_2w)
+
+peak_4w=get_peak_annotations(data.table(atac_4w))
+plotAnnoPie(peak_4w)
+
+peak_8w=get_peak_annotations(data.table(atac_8w))
+plotAnnoPie(peak_8w)
+
+```
+
+#Testing Homer
+
+generating bed files of promoter regions, to run through bedtools intersect and HOMER FindMotifGenome.pl
+```{r}
+peak_df=as.data.frame(peak_1w)
+
+peak_df
+promoter_w1=peak_df[str_detect(peak_df$annotation, 'Promoter'), ]
+
+
+promoter_w1=promoter_w1%>%mutate(geneStrand=case_when(geneStrand==2 ~1, geneStrand==1 ~0))
+
+w1_bed=promoter_w1[, c(1:3, 12)  ]
+
+w1_bed['blank']=NA
+
+w1_bed['strand']=promoter_w1$geneStrand
+
+
+write.csv(w1_bed$geneId, 'genes_w1.txt', row.names = FALSE, col.names = FALSE)
+promoter_w1
+write.table(w1_bed, 'w1_promoters.bed', sep='\t', row.names = FALSE, col.names = FALSE)
+
+```
