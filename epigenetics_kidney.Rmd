@@ -788,6 +788,8 @@ fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
 
 fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
 head(fgsea_results, 10)
+sig <- fgsea_results %>% filter(padj < 0.05)
+w8_sig <- sig$pathway
 ```
 
 ```{r}
@@ -807,6 +809,7 @@ fgseaRes2 <- fgsea(pathways=pathways.hallmark2, stats=ranks)
 
 fgsea_results2 <- as.data.frame(fgseaRes2) %>% arrange(padj)
 head(fgsea_results2, 10)
+print(fgsea_results2$pathway[0:20])
 ```
 
 All the above was for 8w, now check out the other time points too.
@@ -826,6 +829,8 @@ fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
 fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
 head(fgsea_results, 10)
 
+sig <- fgsea_results %>% filter(padj < 0.05)
+w1_sig <- sig$pathway
 
 fgsea_results_sorted <- fgsea_results %>% arrange(NES)
 ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
@@ -850,6 +855,8 @@ fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
 fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
 head(fgsea_results, 10)
 
+sig <- fgsea_results %>% filter(padj < 0.05)
+w2_sig <- sig$pathway
 
 fgsea_results_sorted <- fgsea_results %>% arrange(NES)
 ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
@@ -874,6 +881,8 @@ fgseaRes <- fgsea(pathways=pathways.hallmark, stats=ranks)
 fgsea_results <- as.data.frame(fgseaRes) %>% arrange(padj)
 head(fgsea_results, 10)
 
+sig <- fgsea_results %>% filter(padj < 0.05)
+w4_sig <- sig$pathway
 
 fgsea_results_sorted <- fgsea_results %>% arrange(NES)
 ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
@@ -884,7 +893,13 @@ ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
 ```
 
 
+Make a venn diagram of how many significant genesets overlap between the time points
 
+```{r}
+library(ggvenn)
+sig_gene_sets <- list('1w'=w1_sig,'2w'=w2_sig,'4w'=w4_sig, '8w'=w8_sig)
+ggvenn(sig_gene_sets, show_percentage = FALSE, text_size = 6, label_sep = "\t")
+```
 
 
 
