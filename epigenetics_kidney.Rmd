@@ -602,9 +602,8 @@ dds <- DESeqDataSetFromMatrix(countData = grouped,
 
 dds <- DESeq(dds)
 
-res <- results(dds)
-
-summary(res)
+#res <- results(dds)
+#summary(res)
 
 # Look at contrasts between groups
 
@@ -697,29 +696,48 @@ cont.matrix=makeContrasts(
   
 fit2=contrasts.fit(limma_model1,cont.matrix)
 limma_res=eBayes(fit2)
-topTable(limma_res, coef = "control_1wk_M")
-topTable(limma_res, coef = "control_2wk_M")
-topTable(limma_res, coef = "control_4wk_M")
+
+# male results
+male1wk<-topTable(limma_res, coef = "control_1wk_M", n=Inf)
+male1wk %>% 
+  filter(adj.P.Val < 0.05)
+male2wk<-topTable(limma_res, coef = "control_2wk_M", n=Inf)
+male2wk %>% 
+  filter(adj.P.Val < 0.05)
+male4wk<-topTable(limma_res, coef = "control_4wk_M", n=Inf)
+male4wk %>% 
+  filter(adj.P.Val < 0.05)
 male8wk<-topTable(limma_res, coef = "control_8wk_M", n=Inf)
-topTable(limma_res, coef = "control_1wk_F")
-topTable(limma_res, coef = "control_2wk_F")
-topTable(limma_res, coef = "control_4wk_F")
+male8wk %>% 
+  filter(adj.P.Val < 0.05)
+
+# female results
+female1wk<-topTable(limma_res, coef = "control_1wk_F", n=Inf)
+female1wk %>% 
+  filter(adj.P.Val < 0.05)
+female2wk<-topTable(limma_res, coef = "control_2wk_F", n=Inf)
+female2wk %>% 
+  filter(adj.P.Val < 0.05)
+female4wk<-topTable(limma_res, coef = "control_4wk_F", n=Inf)
+female4wk %>% 
+  filter(adj.P.Val < 0.05)
 female8wk<-topTable(limma_res, coef = "control_8wk_F", n=Inf)
+female8wk %>% 
+  filter(adj.P.Val < 0.05)
 
-# Grouped peaks visualization - significant genes histogram
 
-female8wk
-female8wk$pbins<-NULL
-female8wk$pbins[female8wk$adj.P.Val > 0 & female8wk$adj.P.Val < 0.05] <- "<0.05"
-female8wk$pbins[female8wk$adj.P.Val >=0.05 & female8wk$adj.P.Val < 0.3] <- "0.05-0.3"
-female8wk$pbins[female8wk$adj.P.Val >=0.30 & female8wk$adj.P.Val < 0.6] <- "0.3-0.6"
-female8wk$pbins[female8wk$adj.P.Val >=0.60 & female8wk$adj.P.Val < 0.9] <- "0.6-.9"
-female8wk$pbins[female8wk$adj.P.Val >=0.90 & female8wk$adj.P.Val < 1] <- "0.9-1.0"
+# Histogram
+female2wk$pbins<-NULL
+female2wk$pbins[female2wk$adj.P.Val > 0 & female2wk$adj.P.Val < 0.05] <- "<0.05"
+female2wk$pbins[female2wk$adj.P.Val >=0.05 & female2wk$adj.P.Val < 0.3] <- "0.05-0.3"
+female2wk$pbins[female2wk$adj.P.Val >=0.30 & female2wk$adj.P.Val < 0.6] <- "0.3-0.6"
+female2wk$pbins[female2wk$adj.P.Val >=0.60 & female2wk$adj.P.Val < 0.9] <- "0.6-.9"
+female2wk$pbins[female2wk$adj.P.Val >=0.90 & female2wk$adj.P.Val < 1] <- "0.9-1.0"
 
-female8wk<-female8wk %>% 
+female2wk<-female2wk %>% 
   filter(is.na(adj.P.Val) == FALSE)
 
-ggplot(data = female8wk, 
+ggplot(data = female2wk, 
        aes(x = pbins)) + 
   geom_histogram(stat = "count", color="lightpink", fill="lightpink") +
   stat_count(binwidth = 1, 
@@ -729,10 +747,9 @@ ggplot(data = female8wk,
            position = position_stack(vjust = 0.5))+
   scale_fill_discrete(drop=FALSE) +
           scale_x_discrete(drop=FALSE)+
-  ggtitle("Limma: Adjusted p-value distribution (female control vs. female 8 wk)")+
+  ggtitle("Limma: Adjusted p-value distribution (female control vs. female 2 wk)")+
   theme(plot.title = element_text(hjust = 0.5))+
   labs(x="Adjusted p-value bins", y="Number peaks")
-
 
 ```
 
@@ -751,6 +768,7 @@ bm
 
 Then join the DESeq result with the gene symbols
 ```{r}
+# For DESeq2
 control_8w
 res <- inner_join(control_8w, bm, by=c("row"="ensembl_gene_id"))
 res2 <- res %>% 
@@ -759,7 +777,6 @@ res2 <- res %>%
   group_by(hsapiens_homolog_associated_gene_name) %>% 
   summarize(stat=mean(stat)) %>% 
   filter(hsapiens_homolog_associated_gene_name != "")
-
 ```
 
 Then use fgsea. First we checked out the hallmark 50 genesets
@@ -863,6 +880,7 @@ ggplot(fgsea_results_sorted, aes(x=NES,y=pathway)) +
   scale_y_discrete(limits=fgsea_results_sorted$pathway) +
   geom_col(aes(fill=padj<0.05)) +
   theme(text = element_text(size = 6)) 
+```
 ```
 
 
